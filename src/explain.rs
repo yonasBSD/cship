@@ -220,10 +220,26 @@ fn error_hint_for(
             "workspace data absent from Claude Code context".into(),
             "Ensure Claude Code is running and cship is invoked via the \"statusline\" key in ~/.claude/settings.json.".into(),
         ),
-        "usage_limits" => (
-            "usage_limits returned no data — API fetch failed, timed out, or no cached data available".into(),
-            "Check RUST_LOG=warn output for the specific cause (e.g. HTTP 429 = rate limited, 401 = re-authenticate in Claude Code). The module works normally in a live session once the rate limit clears.".into(),
-        ),
+        "usage_limits" => {
+            // Probe credential state to distinguish missing token from expired token.
+            // NOTE: This arm spawns a subprocess or reads a file — acceptable for the
+            // interactive `cship explain` command but must NOT be called from the
+            // rendering hot path (main.rs pipeline).
+            match crate::platform::get_oauth_token() {
+                Err(msg) if msg.contains("credentials not found") => (
+                    "usage_limits returned no data — no Claude Code credential found".into(),
+                    "Authenticate by opening Claude Code and completing the login flow, then run `cship explain` again.".into(),
+                ),
+                Ok(_) => (
+                    "usage_limits returned no data — credential present but API fetch failed".into(),
+                    "Your Claude Code token may have expired. Re-authenticate by opening Claude Code and completing the login flow, then run `cship explain` again.".into(),
+                ),
+                Err(_) => (
+                    "usage_limits returned no data — credential appears malformed or tool unavailable".into(),
+                    "Re-authenticate by opening Claude Code and completing the login flow, then run `cship explain` again.".into(),
+                ),
+            }
+        }
         _ => (
             "module returned no value".into(),
             "Check cship configuration and ensure Claude Code is running.".into(),
@@ -449,6 +465,61 @@ mod tests {
         assert!(
             !is_disabled("cship.model", &cfg),
             "is_disabled should return false when model config is absent"
+        );
+    }
+
+    // Tests for the usage_limits credential-aware hint branches (TD3).
+    // The exact branch taken depends on the test environment's credential state.
+    // In CI (no credential stored), the "not found" branch fires.
+    // All three tests verify the returned tuple is non-empty and well-formed.
+
+    #[test]
+    fn test_error_hint_usage_limits_returns_non_empty_tuple() {
+        let cfg = CshipConfig::default();
+        let ctx = crate::context::Context::default();
+        let (error, remediation) = error_hint_for("usage_limits", &ctx, &cfg);
+        assert!(
+            !error.is_empty(),
+            "usage_limits error hint must be non-empty"
+        );
+        assert!(
+            !remediation.is_empty(),
+            "usage_limits remediation hint must be non-empty"
+        );
+    }
+
+    #[test]
+    fn test_error_hint_usage_limits_contains_usage_limits_in_error() {
+        let cfg = CshipConfig::default();
+        let ctx = crate::context::Context::default();
+        let (error, _) = error_hint_for("usage_limits", &ctx, &cfg);
+        assert!(
+            error.contains("usage_limits"),
+            "error should mention 'usage_limits', got: {error}"
+        );
+    }
+
+    #[test]
+    fn test_error_hint_usage_limits_matches_valid_branch() {
+        // The exact branch depends on the environment's credential state.
+        // Instead of vacuously skipping assertions, we always verify the
+        // result matches ONE of the three valid branch patterns.
+        let cfg = CshipConfig::default();
+        let ctx = crate::context::Context::default();
+        let (error, remediation) = error_hint_for("usage_limits", &ctx, &cfg);
+
+        let is_no_credential = error.contains("no Claude Code credential found");
+        let is_token_present = error.contains("credential present but API fetch failed");
+        let is_malformed = error.contains("credential appears malformed");
+
+        assert!(
+            is_no_credential || is_token_present || is_malformed,
+            "error must match one of the three hint branches, got: {error}"
+        );
+        // All branches include a re-authentication instruction.
+        assert!(
+            remediation.contains("login flow"),
+            "remediation must include login flow instruction, got: {remediation}"
         );
     }
 }
