@@ -32,14 +32,13 @@ After installing with `cargo`, wire the statusline manually in `~/.claude/settin
 
 ## Configuration
 
-The default config file is `~/.config/cship.toml`. You can also place a `cship.toml` in your project root for per-project overrides. A minimal working example:
+The default config file is `~/.config/cship.toml`. You can also place a `cship.toml` in your project root for per-project overrides. The `lines` array defines the rows of your statusline. Each element is a format string mixing `$cship.<module>` tokens (native cship modules) with Starship module tokens (e.g. `$git_branch`). A minimal working example:
 
 ```toml
 [cship]
 lines = ["$cship.model $cship.cost $cship.context_bar"]
 ```
-
-The `lines` array defines the rows of your statusline. Each element is a format string mixing `$cship.<module>` tokens (native cship modules) with Starship module tokens (e.g. `$git_branch`).
+<img src="./docs/examples/01.png" alt="Initial cship statusline example" width="600">
 
 ### Styling example
 
@@ -53,6 +52,7 @@ warn_style = "bold yellow"
 critical_threshold = 5.0
 critical_style = "bold red"
 ```
+<img src="./docs/examples/02.png" alt="Initial cship statusline example" width="600">
 
 ### Available modules
 
@@ -88,7 +88,7 @@ Six ready-to-use configurations — from minimal to full-featured. Each can be d
 
 One clean row. Model, cost with colour thresholds, context bar.
 
-<!-- image -->
+<img src="./docs/examples/03.gif" alt="Minimal cship statusline example" width="600">
 
 <details>
 <summary>View config</summary>
@@ -106,9 +106,9 @@ critical_style     = "bold red"
 
 [cship.context_bar]
 width              = 10
-warn_threshold     = 75.0
+warn_threshold     = 40.0
 warn_style         = "yellow"
-critical_threshold = 90.0
+critical_threshold = 70.0
 critical_style     = "bold red"
 ```
 
@@ -120,7 +120,7 @@ critical_style     = "bold red"
 
 Two rows: Starship git status on top, Claude session below. Starship passthrough (`$directory`, `$git_branch`, `$git_status`) requires [Starship](https://starship.rs) to be installed.
 
-<!-- image -->
+<img src="./docs/examples/04.png" alt="Git-aware cship statusline example" width="600">
 
 <details>
 <summary>View config</summary>
@@ -128,25 +128,25 @@ Two rows: Starship git status on top, Claude session below. Starship passthrough
 ```toml
 [cship]
 lines = [
-  "$directory  $git_branch  $git_status",
+  "$directory $git_branch $git_status",
   "$cship.model  $cship.cost  $cship.context_bar",
 ]
 
 [cship.model]
-symbol = "◆ "
+symbol = "🤖 "
 style  = "bold cyan"
 
 [cship.cost]
 warn_threshold     = 2.0
 warn_style         = "yellow"
-critical_threshold = 8.0
+critical_threshold = 5.0
 critical_style     = "bold red"
 
 [cship.context_bar]
-width              = 12
-warn_threshold     = 70.0
+width              = 10
+warn_threshold     = 40.0
 warn_style         = "yellow"
-critical_threshold = 85.0
+critical_threshold = 70.0
 critical_style     = "bold red"
 ```
 
@@ -158,7 +158,7 @@ critical_style     = "bold red"
 
 Shows cost, lines changed, and rolling API usage limits all at once. Colour escalates as budgets fill.
 
-<!-- image -->
+<img src="./docs/examples/05.png" alt="Cost guardian cship statusline example" width="600">
 
 <details>
 <summary>View config</summary>
@@ -166,31 +166,30 @@ Shows cost, lines changed, and rolling API usage limits all at once. Colour esca
 ```toml
 [cship]
 lines = [
-  "$cship.model  $cship.cost  +$cship.cost.total_lines_added -$cship.cost.total_lines_removed",
-  "$cship.context_bar  $cship.usage_limits",
+  "$cship.model $cship.cost +$cship.cost.total_lines_added -$cship.cost.total_lines_removed",
+  "$cship.context_bar $cship.usage_limits",
 ]
 
 [cship.model]
 style = "bold purple"
 
 [cship.cost]
-symbol             = "$ "
 warn_threshold     = 1.0
 warn_style         = "bold yellow"
 critical_threshold = 3.0
 critical_style     = "bold red"
 
 [cship.context_bar]
-width              = 14
-warn_threshold     = 60.0
+width              = 10
+warn_threshold     = 40.0
 warn_style         = "yellow"
-critical_threshold = 80.0
+critical_threshold = 70.0
 critical_style     = "bold red"
 
 [cship.usage_limits]
 five_hour_format   = "5h {pct}%"
 seven_day_format   = "7d {pct}%"
-separator          = "  "
+separator          = " "
 warn_threshold     = 70.0
 warn_style         = "bold yellow"
 critical_threshold = 90.0
@@ -205,7 +204,7 @@ critical_style     = "bold red"
 
 Every style value is a `fg:#rrggbb` hex colour — no named colours anywhere. Amber warns, coral criticals.
 
-<!-- image -->
+`<img src="./docs/examples/06.png" alt="Material Hex cship statusline example" width="600">
 
 <details>
 <summary>View config</summary>
@@ -213,8 +212,8 @@ Every style value is a `fg:#rrggbb` hex colour — no named colours anywhere. Am
 ```toml
 [cship]
 lines = [
-  "$cship.model  $cship.cost  $cship.context_bar",
-  "$cship.usage_limits",
+  "$cship.model $cship.cost",
+  "$cship.context_bar $cship.usage_limits",
 ]
 
 [cship.model]
@@ -228,17 +227,17 @@ critical_threshold = 6.0
 critical_style     = "bold fg:#f07178"
 
 [cship.context_bar]
-width              = 14
+width              = 10
 style              = "fg:#89ddff"
-warn_threshold     = 65.0
+warn_threshold     = 40.0
 warn_style         = "fg:#ffcb6b"
-critical_threshold = 85.0
+critical_threshold = 70.0
 critical_style     = "bold fg:#f07178"
 
 [cship.usage_limits]
 five_hour_format   = "5h {pct}%"
 seven_day_format   = "7d {pct}%"
-separator          = "  "
+separator          = " "
 warn_threshold     = 70.0
 warn_style         = "fg:#ffcb6b"
 critical_threshold = 90.0
@@ -253,7 +252,7 @@ critical_style     = "bold fg:#f07178"
 
 Three-row layout for polyglot developers. Starship handles language runtimes and git; cship handles session data. Styled with the [Tokyo Night](https://github.com/folke/tokyonight.nvim) colour palette.
 
-<!-- image -->
+<img src="./docs/examples/07.png" alt="Tokyo Night cship statusline example" width="600">
 
 <details>
 <summary>View config</summary>
@@ -261,13 +260,20 @@ Three-row layout for polyglot developers. Starship handles language runtimes and
 ```toml
 [cship]
 lines = [
-  "$directory  $git_branch  $git_status  $python  $nodejs  $rust",
-  "$cship.model  $cship.agent",
-  "$cship.context_bar  $cship.cost  $cship.usage_limits",
+  """
+  $directory\
+  $git_branch\
+  $git_status\
+  $python\
+  $nodejs\
+  $rust
+  """,
+  "$cship.model $cship.agent",
+  "$cship.context_bar $cship.cost $cship.usage_limits",
 ]
 
 [cship.model]
-symbol = "◈ "
+symbol = "🤖 "
 style  = "bold fg:#7aa2f7"
 
 [cship.agent]
@@ -275,25 +281,25 @@ symbol = "↳ "
 style  = "fg:#9ece6a"
 
 [cship.context_bar]
-width              = 16
+width              = 10
 style              = "fg:#7dcfff"
-warn_threshold     = 60.0
+warn_threshold     = 40.0
 warn_style         = "fg:#e0af68"
-critical_threshold = 80.0
+critical_threshold = 70.0
 critical_style     = "bold fg:#f7768e"
 
 [cship.cost]
-symbol             = "$ "
+symbol             = "💰 "
 style              = "fg:#a9b1d6"
 warn_threshold     = 2.0
 warn_style         = "fg:#e0af68"
-critical_threshold = 8.0
+critical_threshold = 5.0
 critical_style     = "bold fg:#f7768e"
 
 [cship.usage_limits]
-five_hour_format   = "5h {pct}%"
-seven_day_format   = "7d {pct}%"
-separator          = " · "
+five_hour_format   = "⌛ 5h {pct}%"
+seven_day_format   = "📅 7d {pct}%"
+separator          = " "
 warn_threshold     = 70.0
 warn_style         = "fg:#e0af68"
 critical_threshold = 90.0
@@ -306,9 +312,9 @@ critical_style     = "bold fg:#f7768e"
 
 ### 6. Nerd Fonts
 
-Requires a [Nerd Font](https://www.nerdfonts.com) in your terminal. Icons are embedded as `symbol` values on each module and as literal characters in the format string for Starship passthrough rows.
+Requires a [Nerd Font](https://www.nerdfonts.com) in your terminal. Icons are embedded as `symbol` values on each module and as literal characters in the format string for Starship passthrough rows. You can use `format` to control how the symbol and value are combined for each module exactly like you'd do with Starship.
 
-<!-- image -->
+<img src="./docs/examples/08.png" alt="Nerd Fonts cship statusline example" width="600">
 
 <details>
 <summary>View config</summary>
@@ -316,38 +322,47 @@ Requires a [Nerd Font](https://www.nerdfonts.com) in your terminal. Icons are em
 ```toml
 [cship]
 lines = [
-  " $directory   $git_branch  $git_status",
-  "$cship.model  $cship.cost  $cship.context_bar  $cship.usage_limits",
+  """
+  $directory\
+  $git_branch\
+  $git_status\
+  $python\
+  $nodejs\
+  $rust
+  """,
+  "$cship.model $cship.cost $cship.context_bar $cship.usage_limits",
 ]
 
 [cship.model]
-symbol = " "
-style  = "bold cyan"
+symbol = " "
+style  = "bold fg:#7aa2f7"
 
 [cship.cost]
-symbol             = " "
-style              = "green"
+symbol             = "💰 "
+style              = "fg:#a9b1d6"
 warn_threshold     = 2.0
-warn_style         = "yellow"
-critical_threshold = 6.0
-critical_style     = "bold red"
+warn_style         = "fg:#e0af68"
+critical_threshold = 5.0
+critical_style     = "bold fg:#f7768e"
 
 [cship.context_bar]
-symbol             = " "
-width              = 12
-warn_threshold     = 70.0
-warn_style         = "yellow"
-critical_threshold = 88.0
-critical_style     = "bold red"
+symbol             = " "
+format             = "[$symbol$value]($style)"
+width              = 10
+style              = "fg:#7dcfff"
+warn_threshold     = 40.0
+warn_style         = "fg:#e0af68"
+critical_threshold = 70.0
+critical_style     = "bold fg:#f7768e"
 
 [cship.usage_limits]
-five_hour_format   = "󱐋  5h {pct}%"
-seven_day_format   = "7d {pct}%"
-separator          = "  "
+five_hour_format   = "⌛ 5h {pct}%"
+seven_day_format   = "📅 7d {pct}%"
+separator          = " "
 warn_threshold     = 70.0
-warn_style         = "yellow"
+warn_style         = "fg:#e0af68"
 critical_threshold = 90.0
-critical_style     = "bold red"
+critical_style     = "bold fg:#f7768e"
 ```
 
 </details>
