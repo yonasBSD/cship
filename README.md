@@ -56,6 +56,8 @@ critical_style = "bold red"
 
 ### Available modules
 
+Everything in the [Claude Code status line documentation](https://code.claude.com/docs/en/statusline#available-data) is available as a `$cship.<module>` token for you to mix and match in the `lines` format strings. Here are the most popular ones:
+
 | Token | Description |
 |-------|-------------|
 | `$cship.model` | Claude model name |
@@ -63,7 +65,6 @@ critical_style = "bold red"
 | `$cship.context_bar` | Visual progress bar of context window usage |
 | `$cship.context_window` | Context window tokens (used/total) |
 | `$cship.usage_limits` | API usage limits (5hr / 7-day) |
-| `$cship.vim` | Vim mode indicator |
 | `$cship.agent` | Sub-agent name |
 | `$cship.session` | Session identity info |
 | `$cship.workspace` | Workspace/project directory |
