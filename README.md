@@ -375,7 +375,7 @@ critical_style     = "bold fg:#f7768e"
 
 ---
 
-## 📚 Full documentation [Coming Soon]
+## 📚 Full documentation
 
 → **[cship.dev](https://cship.dev)**
 
