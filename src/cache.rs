@@ -148,10 +148,10 @@ pub fn read_usage_limits(transcript_path: &Path, allow_stale: bool) -> Option<Us
 }
 
 /// Write usage limits data to the cache file.
-/// Sets `expires_at` to now + 60 seconds.
+/// Sets `expires_at` to now + `ttl_secs` seconds (default 60).
 /// Silently no-ops on any I/O error — cache write failure must never surface to the user.
 /// The OAuth token is never present in the written data (NFR-S3).
-pub fn write_usage_limits(transcript_path: &Path, data: &UsageLimitsData) {
+pub fn write_usage_limits(transcript_path: &Path, data: &UsageLimitsData, ttl_secs: u64) {
     let Some(path) = usage_limits_cache_path(transcript_path) else {
         return;
     };
@@ -161,7 +161,7 @@ pub fn write_usage_limits(transcript_path: &Path, data: &UsageLimitsData) {
     let now = now_epoch();
     let envelope = UsageLimitsCacheEnvelope {
         data: data.clone(),
-        expires_at: now + 60,
+        expires_at: now + ttl_secs,
         five_hour_resets_at: epoch_or_never(&data.five_hour_resets_at),
         seven_day_resets_at: epoch_or_never(&data.seven_day_resets_at),
     };
@@ -293,7 +293,7 @@ mod tests {
     #[test]
     fn test_usage_limits_cache_hit_within_ttl() {
         let (dir, transcript) = temp_transcript("s5_2_hit");
-        write_usage_limits(&transcript, &sample_data());
+        write_usage_limits(&transcript, &sample_data(), 60);
         let result = read_usage_limits(&transcript, false);
         assert!(result.is_some(), "fresh cache should return Some");
         let data = result.unwrap();
@@ -316,7 +316,7 @@ mod tests {
     fn test_usage_limits_cache_file_path_and_json_structure() {
         let dir = tempfile::tempdir().expect("tempdir");
         let transcript = dir.path().join("transcript.jsonl");
-        write_usage_limits(&transcript, &sample_data());
+        write_usage_limits(&transcript, &sample_data(), 60);
         let expected_path = dir.path().join("cship").join("transcript-usage-limits");
         assert!(expected_path.exists(), "cache file at: {expected_path:?}");
         let raw = std::fs::read_to_string(&expected_path).unwrap();
@@ -334,7 +334,7 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let transcript = dir.path().join("transcript.jsonl");
         // Write a valid cache entry first
-        write_usage_limits(&transcript, &sample_data());
+        write_usage_limits(&transcript, &sample_data(), 60);
         // Overwrite with an expired envelope (expires_at = 0, resets_at far future)
         let path = dir.path().join("cship").join("transcript-usage-limits");
         let expired = serde_json::json!({
@@ -365,7 +365,7 @@ mod tests {
             five_hour_resets_at: "2000-01-01T00:00:00Z".into(), // past
             seven_day_resets_at: "2099-01-01T00:00:00Z".into(), // future
         };
-        write_usage_limits(&transcript, &data);
+        write_usage_limits(&transcript, &data, 60);
         let result = read_usage_limits(&transcript, false);
         assert!(
             result.is_none(),
@@ -378,7 +378,7 @@ mod tests {
     fn test_usage_limits_write_creates_directory() {
         let dir = tempfile::tempdir().expect("tempdir");
         let transcript = dir.path().join("deep").join("nested").join("t.jsonl");
-        write_usage_limits(&transcript, &sample_data());
+        write_usage_limits(&transcript, &sample_data(), 60);
         let cache_file = dir
             .path()
             .join("deep")
@@ -403,7 +403,7 @@ mod tests {
             five_hour_resets_at: "2099-01-01T00:00:00Z".into(), // future
             seven_day_resets_at: "2000-01-01T00:00:00Z".into(), // past
         };
-        write_usage_limits(&transcript, &data);
+        write_usage_limits(&transcript, &data, 60);
         let result = read_usage_limits(&transcript, false);
         assert!(
             result.is_none(),
@@ -423,7 +423,7 @@ mod tests {
             five_hour_resets_at: String::new(),
             seven_day_resets_at: String::new(),
         };
-        write_usage_limits(&transcript, &data);
+        write_usage_limits(&transcript, &data, 60);
         let result = read_usage_limits(&transcript, false);
         assert!(
             result.is_some(),
@@ -437,7 +437,7 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let transcript = dir.path().join("transcript.jsonl");
         // Write a valid cache entry, then overwrite with expired TTL
-        write_usage_limits(&transcript, &sample_data());
+        write_usage_limits(&transcript, &sample_data(), 60);
         let path = dir.path().join("cship").join("transcript-usage-limits");
         let expired = serde_json::json!({
             "data": {
@@ -508,7 +508,7 @@ mod tests {
             five_hour_resets_at: "2000-01-01T00:00:00+00:00".into(), // past, +00:00 format
             seven_day_resets_at: "2099-01-01T00:00:00+00:00".into(), // future
         };
-        write_usage_limits(&transcript, &data);
+        write_usage_limits(&transcript, &data, 60);
         let result = read_usage_limits(&transcript, false);
         assert!(
             result.is_none(),
@@ -530,5 +530,28 @@ mod tests {
             Some(946_684_801),
             "fractional seconds are truncated, not rounded"
         );
+    }
+
+    #[test]
+    fn test_usage_limits_custom_ttl_sets_expires_at() {
+        // Issue #95: configurable TTL — verify custom TTL is respected in cache envelope
+        let dir = tempfile::tempdir().expect("tempdir");
+        let transcript = dir.path().join("transcript.jsonl");
+        write_usage_limits(&transcript, &sample_data(), 300);
+        let path = dir.path().join("cship").join("transcript-usage-limits");
+        let raw = std::fs::read_to_string(&path).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        let expires_at = v["expires_at"].as_u64().unwrap();
+        let now = now_epoch();
+        // expires_at should be approximately now + 300 (±2s tolerance for test execution)
+        assert!(
+            expires_at >= now + 298 && expires_at <= now + 302,
+            "expected expires_at ~now+300, got delta={}",
+            expires_at.saturating_sub(now)
+        );
+        // Cache should still be valid (not expired within the custom window)
+        let result = read_usage_limits(&transcript, false);
+        assert!(result.is_some(), "cache with 300s TTL should be valid");
+        drop(dir);
     }
 }

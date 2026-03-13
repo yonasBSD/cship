@@ -48,10 +48,13 @@ pub fn render(ctx: &Context, cfg: &CshipConfig) -> Option<String> {
         };
 
         // Step 4b: dispatch fetch with 2s timeout
+        // Configurable TTL (default 60s) — Issue #95
+        let ttl_secs = ul_cfg.and_then(|c| c.ttl).unwrap_or(60);
+
         match fetch_with_timeout(move || crate::usage_limits::fetch_usage_limits(&token)) {
             Some(fresh) => {
                 // Step 4c: write fresh data to cache for future renders
-                cache::write_usage_limits(transcript_path, &fresh);
+                cache::write_usage_limits(transcript_path, &fresh, ttl_secs);
                 fresh
             }
             // AC #4: on timeout or API error, fall back to last cached value (may be stale)
@@ -250,7 +253,7 @@ mod tests {
             five_hour_resets_at: "2099-01-01T00:00:00Z".into(),
             seven_day_resets_at: "2099-01-01T00:00:00Z".into(),
         };
-        crate::cache::write_usage_limits(&transcript, &data);
+        crate::cache::write_usage_limits(&transcript, &data, 60);
 
         let ctx = Context {
             transcript_path: Some(transcript.to_str().unwrap().to_string()),
@@ -273,7 +276,7 @@ mod tests {
             five_hour_resets_at: "2099-01-01T00:00:00Z".into(),
             seven_day_resets_at: "2099-01-01T00:00:00Z".into(),
         };
-        crate::cache::write_usage_limits(&transcript, &data);
+        crate::cache::write_usage_limits(&transcript, &data, 60);
 
         let ctx = Context {
             transcript_path: Some(transcript.to_str().unwrap().to_string()),
@@ -304,7 +307,7 @@ mod tests {
             five_hour_resets_at: "2099-01-01T00:00:00Z".into(),
             seven_day_resets_at: "2099-01-01T00:00:00Z".into(),
         };
-        crate::cache::write_usage_limits(&transcript, &data);
+        crate::cache::write_usage_limits(&transcript, &data, 60);
 
         let ctx = Context {
             transcript_path: Some(transcript.to_str().unwrap().to_string()),
@@ -340,7 +343,7 @@ mod tests {
             five_hour_resets_at: "2099-01-01T00:00:00Z".into(),
             seven_day_resets_at: "2099-01-01T00:00:00Z".into(),
         };
-        crate::cache::write_usage_limits(&transcript, &data);
+        crate::cache::write_usage_limits(&transcript, &data, 60);
 
         let ctx = Context {
             transcript_path: Some(transcript.to_str().unwrap().to_string()),
@@ -376,7 +379,7 @@ mod tests {
             five_hour_resets_at: "2099-01-01T00:00:00Z".into(),
             seven_day_resets_at: "2099-01-01T00:00:00Z".into(),
         };
-        crate::cache::write_usage_limits(&transcript, &data);
+        crate::cache::write_usage_limits(&transcript, &data, 60);
         // Verify read_usage_limits(allow_stale=true) works even after TTL would normally expire
         let stale = crate::cache::read_usage_limits(&transcript, true);
         assert!(
@@ -602,7 +605,7 @@ mod tests {
             five_hour_resets_at: "2099-01-01T00:00:00Z".into(),
             seven_day_resets_at: "2099-01-01T00:00:00Z".into(),
         };
-        crate::cache::write_usage_limits(&transcript, &data);
+        crate::cache::write_usage_limits(&transcript, &data, 60);
 
         let ctx = Context {
             transcript_path: Some(transcript.to_str().unwrap().to_string()),
