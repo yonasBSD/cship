@@ -185,6 +185,9 @@ pub struct UsageLimitsConfig {
     pub warn_style: Option<String>,
     pub critical_threshold: Option<f64>,
     pub critical_style: Option<String>,
+    /// Cache refresh interval in seconds. Default: 60.
+    /// Increase to reduce API pressure with many concurrent sessions.
+    pub ttl: Option<u64>,
     /// Reserved — not yet rendered. Use `five_hour_format`, `seven_day_format`,
     /// and `separator` for per-section format control.
     pub format: Option<String>,
