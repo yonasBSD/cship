@@ -104,11 +104,11 @@ fn read_credentials_file() -> Option<String> {
 /// 3. `USERPROFILE` env var (Windows native; Claude Code stores .claude here)
 pub(crate) fn home_dir() -> Option<std::path::PathBuf> {
     for var in ["CLAUDE_HOME", "HOME", "USERPROFILE"] {
-        if let Ok(h) = std::env::var(var) {
-            if !h.is_empty() {
+        if let Ok(h) = std::env::var(var)
+            && !h.is_empty() {
                 return Some(std::path::PathBuf::from(h));
             }
-        }
+        
     }
     None
 }
