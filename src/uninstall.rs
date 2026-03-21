@@ -115,14 +115,20 @@ mod tests {
     #[test]
     fn test_remove_binary_present() {
         with_tempdir(|home| {
+            let bin_name = if cfg!(target_os = "windows") {
+                "cship.exe"
+            } else {
+                "cship"
+            };
+
             let local_bin = home.join(".local/bin");
             std::fs::create_dir_all(&local_bin).unwrap();
-            let local_path = local_bin.join("cship");
+            let local_path = local_bin.join(bin_name);
             std::fs::write(&local_path, b"fake binary").unwrap();
 
             let cargo_bin = home.join(".cargo/bin");
             std::fs::create_dir_all(&cargo_bin).unwrap();
-            let cargo_path = cargo_bin.join("cship");
+            let cargo_path = cargo_bin.join(bin_name);
             std::fs::write(&cargo_path, b"fake binary").unwrap();
 
             remove_binary(home);
