@@ -193,17 +193,7 @@ fn format_time_until_epoch(reset_epoch: u64) -> String {
     if now >= reset_epoch {
         return "now".to_string();
     }
-    let secs = reset_epoch - now;
-    let mins = secs / 60;
-    let hours = mins / 60;
-    let days = hours / 24;
-    if days > 0 {
-        format!("{}d{}h", days, hours % 24)
-    } else if hours > 0 {
-        format!("{}h{}m", hours, mins % 60)
-    } else {
-        format!("{}m", mins)
-    }
+    format_remaining_secs(reset_epoch - now)
 }
 
 /// Convert an ISO 8601 reset timestamp to a human-readable time-until string.
@@ -229,7 +219,17 @@ fn format_time_until(resets_at: &str) -> String {
     if now >= reset_epoch {
         return "now".to_string();
     }
-    let secs = reset_epoch - now;
+    format_remaining_secs(reset_epoch - now)
+}
+
+/// Format a number of remaining seconds as a compact human-readable string.
+///
+/// Shared arithmetic used by both `format_time_until_epoch` and `format_time_until`.
+///
+/// - < 1 hour → `"45m"`
+/// - < 1 day → `"4h12m"`
+/// - >= 1 day → `"3d2h"`
+fn format_remaining_secs(secs: u64) -> String {
     let mins = secs / 60;
     let hours = mins / 60;
     let days = hours / 24;

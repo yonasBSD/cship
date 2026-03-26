@@ -21,8 +21,10 @@ pub struct UsageLimitsData {
     pub five_hour_resets_at: String, // ISO 8601; empty string when API returns null
     pub seven_day_resets_at: String, // ISO 8601; empty string when API returns null
     /// Unix epoch seconds for the five-hour window reset; `Some` only on the stdin path.
+    #[serde(default)]
     pub five_hour_resets_at_epoch: Option<u64>,
     /// Unix epoch seconds for the seven-day window reset; `Some` only on the stdin path.
+    #[serde(default)]
     pub seven_day_resets_at_epoch: Option<u64>,
 }
 
