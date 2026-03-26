@@ -180,11 +180,21 @@ pub fn render_used_tokens(ctx: &Context, cfg: &CshipConfig) -> Option<String> {
     }
     let cw = match ctx.context_window.as_ref() {
         Some(cw) => cw,
-        None => return None,
+        None => {
+            tracing::warn!(
+                "cship.context_window.used_tokens: context_window absent from context"
+            );
+            return None;
+        }
     };
     let cu = match cw.current_usage.as_ref() {
         Some(cu) => cu,
-        None => return None,
+        None => {
+            tracing::warn!(
+                "cship.context_window.used_tokens: current_usage absent from context_window"
+            );
+            return None;
+        }
     };
     let used = cu.input_tokens.unwrap_or(0)
         + cu.cache_creation_input_tokens.unwrap_or(0)
@@ -910,7 +920,7 @@ mod tests {
             render_total_input_tokens(&ctx, &CshipConfig::default()),
             None
         );
-        // Story 1.2: render_used_tokens must also return None silently when context_window absent
+        // Story 1.2: render_used_tokens must also return None (with tracing::warn!) when context_window absent
         assert_eq!(render_used_tokens(&ctx, &CshipConfig::default()), None);
     }
 
@@ -1466,8 +1476,8 @@ mod tests {
     // --- Story 1.2: explicit match + tracing::warn! for render_used_tokens ---
 
     #[test]
-    fn test_used_tokens_absent_current_usage_returns_none_silently() {
-        // AC1: current_usage is None (before first API call) → silent None, no panic
+    fn test_used_tokens_absent_current_usage_returns_none() {
+        // AC1: current_usage is None → tracing::warn! emitted, returns None
         let ctx = Context {
             context_window: Some(ContextWindow {
                 used_percentage: Some(50.0),
