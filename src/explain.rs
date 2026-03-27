@@ -12,7 +12,7 @@ pub fn run(config_override: Option<&std::path::Path>) -> String {
 
 /// Testable entry point — accepts an injected reader instead of real stdin.
 /// `main.rs` is the sole stdout writer; this function only builds the string.
-pub fn run_with_reader(
+pub(crate) fn run_with_reader(
     config_override: Option<&std::path::Path>,
     reader: impl std::io::Read,
 ) -> String {
