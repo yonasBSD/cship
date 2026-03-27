@@ -67,8 +67,12 @@ pub fn render_styled_value(
             .and_then(|c| c.symbol.as_deref())
             .or_else(|| parent.and_then(|p| p.symbol_str()));
         let effective_style = crate::ansi::resolve_threshold_style(
-            effective_val, style, warn_threshold, warn_style,
-            critical_threshold, critical_style,
+            effective_val,
+            style,
+            warn_threshold,
+            warn_style,
+            critical_threshold,
+            critical_style,
         );
         let result = apply_module_format(fmt, Some(val_str), symbol, effective_style);
         if result.is_none() {
@@ -82,8 +86,13 @@ pub fn render_styled_value(
 
     // Default path: apply_style_with_threshold handles no-threshold gracefully
     Some(crate::ansi::apply_style_with_threshold(
-        val_str, effective_val, style, warn_threshold, warn_style,
-        critical_threshold, critical_style,
+        val_str,
+        effective_val,
+        style,
+        warn_threshold,
+        warn_style,
+        critical_threshold,
+        critical_style,
     ))
 }
 
@@ -450,6 +459,9 @@ mod tests {
             ..Default::default()
         };
         let result = render_styled_value("x", None, Some(&sub_empty_fmt), None);
-        assert_eq!(result, None, "empty format string should cause format path to return None");
+        assert_eq!(
+            result, None,
+            "empty format string should cause format path to return None"
+        );
     }
 }
