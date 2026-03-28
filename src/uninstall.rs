@@ -171,6 +171,7 @@ mod tests {
                 let bin_path = programs_dir.join("cship.exe");
                 std::fs::write(&bin_path, b"fake binary").unwrap();
                 // Point LOCALAPPDATA to our temp dir so remove_binary finds it
+                // SAFETY: guarded by HOME_MUTEX; no other threads read LOCALAPPDATA concurrently.
                 unsafe { std::env::set_var("LOCALAPPDATA", tmp.path()) };
                 (tmp, bin_path)
             };
@@ -186,6 +187,7 @@ mod tests {
                     !localappdata_bin_path.exists(),
                     "LOCALAPPDATA binary should be removed on Windows"
                 );
+                // SAFETY: guarded by HOME_MUTEX; no other threads read LOCALAPPDATA concurrently.
                 unsafe { std::env::remove_var("LOCALAPPDATA") };
                 drop(tmp_local);
             }
@@ -223,6 +225,43 @@ mod tests {
                 Some("value"),
                 "other keys should be preserved"
             );
+        });
+    }
+
+    #[test]
+    #[cfg(target_os = "windows")]
+    fn test_remove_statusline_uses_appdata_on_windows() {
+        with_tempdir(|home| {
+            // Create a temp APPDATA directory with Claude/settings.json
+            let tmp_appdata = tempfile::tempdir().unwrap();
+            let claude_dir = tmp_appdata.path().join("Claude");
+            std::fs::create_dir_all(&claude_dir).unwrap();
+            let settings_path = claude_dir.join("settings.json");
+            std::fs::write(
+                &settings_path,
+                r#"{"statusline":"cship","otherKey":"value"}"#,
+            )
+            .unwrap();
+
+            // SAFETY: guarded by HOME_MUTEX; no other threads read APPDATA concurrently.
+            unsafe { std::env::set_var("APPDATA", tmp_appdata.path()) };
+
+            remove_statusline_from_settings(home);
+
+            let content = std::fs::read_to_string(&settings_path).unwrap();
+            let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
+            assert!(
+                parsed.get("statusline").is_none(),
+                "statusline key should be removed from APPDATA path on Windows"
+            );
+            assert_eq!(
+                parsed.get("otherKey").and_then(|v| v.as_str()),
+                Some("value"),
+                "other keys should be preserved"
+            );
+
+            // SAFETY: guarded by HOME_MUTEX; no other threads read APPDATA concurrently.
+            unsafe { std::env::remove_var("APPDATA") };
         });
     }
 
@@ -299,6 +338,7 @@ mod tests {
         // Should print message and return, not panic or touch root paths
         run();
         // Restore to avoid poisoning other tests
+        // SAFETY: guarded by HOME_MUTEX; no other threads read CLAUDE_HOME concurrently.
         unsafe { std::env::remove_var("CLAUDE_HOME") };
     }
 }
