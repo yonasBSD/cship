@@ -102,6 +102,11 @@ fn read_credentials_file() -> Option<String> {
 /// 1. `CLAUDE_HOME` env var (explicit override for non-standard installs, all platforms)
 /// 2. `HOME` env var (Unix standard; also set by Git Bash / WSL on Windows)
 /// 3. `USERPROFILE` env var (Windows native; Claude Code stores .claude here)
+///
+/// # Note on `CLAUDE_HOME`
+///
+/// `CLAUDE_HOME` must point to the *parent* of `.claude`, not to `.claude` itself.
+/// e.g. `CLAUDE_HOME=/home/user` (the parent of `.claude`, not `.claude` itself)
 pub(crate) fn home_dir() -> Option<std::path::PathBuf> {
     for var in ["CLAUDE_HOME", "HOME", "USERPROFILE"] {
         if let Ok(h) = std::env::var(var)
@@ -129,6 +134,9 @@ pub fn get_oauth_token() -> Result<String, String> {
         "Claude Code credentials found but access token could not be parsed — credential may be malformed".into()
     })
 }
+
+#[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
+compile_error!("cship: get_oauth_token() is only supported on macOS, Linux, and Windows");
 
 /// Inner implementation with injectable command name for testability.
 /// `tool` is the binary; `args` are the arguments passed to it.
