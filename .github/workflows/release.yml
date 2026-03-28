@@ -56,7 +56,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
       - uses: actions/checkout@v4
       - name: Install Rust stable
@@ -86,6 +86,10 @@ jobs:
             runner: ubuntu-latest
           - target: aarch64-unknown-linux-musl
             runner: ubuntu-24.04-arm
+          - target: x86_64-pc-windows-msvc
+            runner: windows-latest
+          - target: aarch64-pc-windows-msvc
+            runner: windows-11-arm
     steps:
       - uses: actions/checkout@v4
       - name: Install Rust stable
@@ -99,15 +103,21 @@ jobs:
       - name: Build release binary
         run: cargo build --release --target ${{ matrix.target }}
       - name: Rename binary
-        run: cp target/${{ matrix.target }}/release/cship cship-${{ matrix.target }}
-      - name: Validate binary
+        shell: bash
         run: |
-          file cship-${{ matrix.target }}
-          test -s cship-${{ matrix.target }} || { echo "ERROR: binary is empty"; exit 1; }
+          EXT=""
+          if [[ "${{ matrix.target }}" == *windows* ]]; then EXT=".exe"; fi
+          cp "target/${{ matrix.target }}/release/cship${EXT}" "cship-${{ matrix.target }}${EXT}"
+      - name: Validate binary
+        shell: bash
+        run: |
+          EXT=""
+          if [[ "${{ matrix.target }}" == *windows* ]]; then EXT=".exe"; fi
+          test -s "cship-${{ matrix.target }}${EXT}" || { echo "ERROR: binary is empty"; exit 1; }
       - uses: actions/upload-artifact@v4
         with:
           name: cship-${{ matrix.target }}
-          path: cship-${{ matrix.target }}
+          path: cship-${{ matrix.target }}*
 
   release:
     name: Publish GitHub Release
