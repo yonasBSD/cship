@@ -113,6 +113,7 @@ jobs:
         run: |
           EXT=""
           if [[ "${{ matrix.target }}" == *windows* ]]; then EXT=".exe"; fi
+          if [[ "${{ matrix.target }}" != *windows* ]]; then file "cship-${{ matrix.target }}"; fi
           test -s "cship-${{ matrix.target }}${EXT}" || { echo "ERROR: binary is empty"; exit 1; }
       - uses: actions/upload-artifact@v4
         with:
