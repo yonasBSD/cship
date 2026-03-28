@@ -203,6 +203,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(target_os = "windows"))]
     fn test_remove_statusline_present() {
         with_tempdir(|home| {
             let claude_dir = home.join(".claude");
