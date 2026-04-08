@@ -50,11 +50,10 @@ pub fn render(_ctx: &Context, cfg: &CshipConfig) -> Option<String> {
 
 /// Returns `true` when `utc_epoch_secs` falls within the configured peak window
 /// (default: Mon–Fri 07:00–17:00 US Pacific).
-fn is_peak_time(
-    utc_epoch_secs: u64,
-    pk_cfg: Option<&crate::config::PeakUsageConfig>,
-) -> bool {
-    let start = pk_cfg.and_then(|c| c.start_hour).unwrap_or(DEFAULT_START_HOUR);
+fn is_peak_time(utc_epoch_secs: u64, pk_cfg: Option<&crate::config::PeakUsageConfig>) -> bool {
+    let start = pk_cfg
+        .and_then(|c| c.start_hour)
+        .unwrap_or(DEFAULT_START_HOUR);
     let end = pk_cfg.and_then(|c| c.end_hour).unwrap_or(DEFAULT_END_HOUR);
 
     if start >= end {
@@ -64,9 +63,10 @@ fn is_peak_time(
         );
         return false;
     }
-    if start > 23 || end > 23 {
+    if start > 23 || end > 24 {
         tracing::warn!(
-            "cship.peak_usage: start_hour ({start}) or end_hour ({end}) outside 0–23 range"
+            "cship.peak_usage: start_hour ({start}) or end_hour ({end}) out of range \
+             (start: 0–23, end: 0–24)"
         );
         return false;
     }
@@ -100,7 +100,7 @@ fn pacific_offset_secs(utc_epoch_secs: u64) -> i64 {
     let november_first_sunday = nth_sunday_of_month(year, 11, 1);
 
     let is_pdt = match month {
-        4..=10 => true, // Apr–Oct: always PDT
+        4..=10 => true,      // Apr–Oct: always PDT
         1..=2 | 12 => false, // Jan–Feb, Dec: always PST
         3 => {
             // March: PDT after second Sunday 10:00 UTC
@@ -123,8 +123,7 @@ fn utc_epoch_to_ymd_h(secs: u64) -> (i32, u32, u32, u32) {
     let z = (secs / SECS_PER_DAY) as i64 + 719468;
     let era = if z >= 0 { z } else { z - 146096 } / 146097;
     let doe = (z - era * 146097) as u64; // day of era [0, 146096]
-    let yoe =
-        (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
     let y = yoe as i64 + era * 400;
     let doy = doe - (365 * yoe + yoe / 4 - yoe / 100); // day of year [0, 365]
     let mp = (5 * doy + 2) / 153;
@@ -144,7 +143,11 @@ fn nth_sunday_of_month(year: i32, month: u32, n: u32) -> u32 {
     // Day of week for the 1st of the month (0=Sun, 1=Mon, ..., 6=Sat)
     let dow_first = day_of_week(year, month, 1);
     // Days until first Sunday
-    let first_sunday = if dow_first == 0 { 1 } else { 1 + (7 - dow_first) };
+    let first_sunday = if dow_first == 0 {
+        1
+    } else {
+        1 + (7 - dow_first)
+    };
     // Nth Sunday
     first_sunday + 7 * (n - 1)
 }
@@ -156,8 +159,8 @@ fn day_of_week(mut year: i32, month: u32, day: u32) -> u32 {
     if month < 3 {
         year -= 1;
     }
-    ((year + year / 4 - year / 100 + year / 400 + T[(month - 1) as usize] as i32 + day as i32)
-        % 7) as u32
+    ((year + year / 4 - year / 100 + year / 400 + T[(month - 1) as usize] as i32 + day as i32) % 7)
+        as u32
 }
 
 #[cfg(test)]
@@ -179,8 +182,16 @@ mod tests {
 
     /// Days from 1970-01-01 to a civil date (Howard Hinnant algorithm).
     fn civil_days_from_epoch(year: i32, month: u32, day: u32) -> i64 {
-        let y = if month <= 2 { year as i64 - 1 } else { year as i64 };
-        let m = if month <= 2 { month as i64 + 9 } else { month as i64 - 3 };
+        let y = if month <= 2 {
+            year as i64 - 1
+        } else {
+            year as i64
+        };
+        let m = if month <= 2 {
+            month as i64 + 9
+        } else {
+            month as i64 - 3
+        };
         let era = if y >= 0 { y } else { y - 399 } / 400;
         let yoe = (y - era * 400) as u64;
         let doy = (153 * m as u64 + 2) / 5 + day as u64 - 1;
@@ -372,6 +383,30 @@ mod tests {
         };
         let ts = pacific_to_utc(2026, 4, 8, 10);
         assert!(!is_peak_time(ts, Some(&pk_cfg)));
+    }
+
+    #[test]
+    fn test_end_hour_24_covers_full_day() {
+        let pk_cfg = PeakUsageConfig {
+            start_hour: Some(0),
+            end_hour: Some(24),
+            ..Default::default()
+        };
+        // Hour 23 should be included
+        let ts = pacific_to_utc(2026, 4, 8, 23);
+        assert!(is_peak_time(ts, Some(&pk_cfg)));
+    }
+
+    #[test]
+    fn test_end_hour_24_is_valid() {
+        let pk_cfg = PeakUsageConfig {
+            start_hour: Some(7),
+            end_hour: Some(24),
+            ..Default::default()
+        };
+        // Hour 23 within 7–24 window
+        let ts = pacific_to_utc(2026, 4, 8, 23);
+        assert!(is_peak_time(ts, Some(&pk_cfg)));
     }
 
     #[test]

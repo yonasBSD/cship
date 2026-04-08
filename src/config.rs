@@ -278,7 +278,8 @@ pub struct PeakUsageConfig {
     pub format: Option<String>,
     /// Start of peak window in US Pacific time (0–23). Default: 7.
     pub start_hour: Option<u32>,
-    /// End of peak window in US Pacific time (0–23). Default: 17.
+    /// End of peak window in US Pacific time, exclusive (0–24). Default: 17.
+    /// Use 24 to mean "through end of day" (e.g., `start_hour = 0, end_hour = 24` = all day).
     pub end_hour: Option<u32>,
 }
 
