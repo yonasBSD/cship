@@ -170,6 +170,40 @@ pub fn write_usage_limits(transcript_path: &Path, data: &UsageLimitsData, ttl_se
     }
 }
 
+// ── Negative cache marker ────────────────────────────────────────────────────
+
+/// Path for the negative cache marker (same directory as usage-limits cache).
+fn negative_marker_path(transcript_path: &Path) -> Option<std::path::PathBuf> {
+    let dir = transcript_path.parent()?;
+    let stem = transcript_path.file_stem()?.to_str()?;
+    Some(dir.join("cship").join(format!("{stem}-usage-limits-fail")))
+}
+
+/// Returns `true` if a recent failure marker exists and hasn't expired.
+pub fn read_negative_marker(transcript_path: &Path) -> bool {
+    let Some(path) = negative_marker_path(transcript_path) else {
+        return false;
+    };
+    let Ok(raw) = std::fs::read_to_string(&path) else {
+        return false;
+    };
+    let Ok(expires_at) = raw.trim().parse::<u64>() else {
+        return false;
+    };
+    now_epoch() < expires_at
+}
+
+/// Write a failure marker that expires in `cooldown_secs`.
+pub fn write_negative_marker(transcript_path: &Path, cooldown_secs: u64) {
+    let Some(path) = negative_marker_path(transcript_path) else {
+        return;
+    };
+    if let Some(dir) = path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    let _ = std::fs::write(path, (now_epoch() + cooldown_secs).to_string());
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
