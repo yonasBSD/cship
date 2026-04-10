@@ -553,6 +553,62 @@ mod tests {
     }
 
     #[test]
+    fn test_usage_limits_cache_backwards_compat_old_format() {
+        // Old cache JSON (pre-extra-usage/per-model) must still deserialize.
+        // The old format lacks extra_usage_*, seven_day_opus_*, etc. fields —
+        // #[serde(default)] on UsageLimitsData ensures they deserialize as None.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let transcript = dir.path().join("transcript.jsonl");
+        // Write a cache file mimicking the old format (only original fields)
+        let path = dir.path().join("cship").join("transcript-usage-limits");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let old_cache = serde_json::json!({
+            "data": {
+                "five_hour_pct": 42.0,
+                "seven_day_pct": 18.0,
+                "five_hour_resets_at": "2099-01-01T00:00:00Z",
+                "seven_day_resets_at": "2099-01-01T00:00:00Z"
+            },
+            "expires_at": now + 300,
+            "five_hour_resets_at": 9_999_999_999_u64,
+            "seven_day_resets_at": 9_999_999_999_u64
+        });
+        std::fs::write(&path, serde_json::to_string(&old_cache).unwrap()).unwrap();
+        let result = read_usage_limits(&transcript, false);
+        assert!(
+            result.is_some(),
+            "old-format cache should still deserialize"
+        );
+        let data = result.unwrap();
+        assert!((data.five_hour_pct - 42.0).abs() < f64::EPSILON);
+        assert!((data.seven_day_pct - 18.0).abs() < f64::EPSILON);
+        // All new fields should be None (backwards-compatible defaults)
+        assert!(
+            data.extra_usage_enabled.is_none(),
+            "extra_usage_enabled should default to None"
+        );
+        assert!(data.extra_usage_monthly_limit.is_none());
+        assert!(data.extra_usage_used_credits.is_none());
+        assert!(data.extra_usage_utilization.is_none());
+        assert!(
+            data.seven_day_opus_pct.is_none(),
+            "seven_day_opus_pct should default to None"
+        );
+        assert!(data.seven_day_opus_resets_at.is_none());
+        assert!(data.seven_day_sonnet_pct.is_none());
+        assert!(data.seven_day_sonnet_resets_at.is_none());
+        assert!(data.seven_day_cowork_pct.is_none());
+        assert!(data.seven_day_cowork_resets_at.is_none());
+        assert!(data.seven_day_oauth_apps_pct.is_none());
+        assert!(data.seven_day_oauth_apps_resets_at.is_none());
+        drop(dir);
+    }
+
+    #[test]
     fn test_usage_limits_early_invalidation_with_plus_offset_resets_at() {
         // Real API returns "+00:00" format — early invalidation must fire correctly
         let dir = tempfile::tempdir().expect("tempdir");

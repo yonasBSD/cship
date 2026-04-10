@@ -177,9 +177,15 @@ mod tests {
         assert!((data.extra_usage_used_credits.unwrap() - 6195.0).abs() < f64::EPSILON);
         assert!((data.extra_usage_utilization.unwrap() - 30.975).abs() < f64::EPSILON);
         assert!((data.seven_day_opus_pct.unwrap() - 12.0).abs() < f64::EPSILON);
-        assert_eq!(data.seven_day_opus_resets_at.as_deref(), Some("2099-02-01T00:00:00+00:00"));
+        assert_eq!(
+            data.seven_day_opus_resets_at.as_deref(),
+            Some("2099-02-01T00:00:00+00:00")
+        );
         assert!((data.seven_day_sonnet_pct.unwrap() - 3.0).abs() < f64::EPSILON);
-        assert_eq!(data.seven_day_sonnet_resets_at.as_deref(), Some("2099-03-01T00:00:00+00:00"));
+        assert_eq!(
+            data.seven_day_sonnet_resets_at.as_deref(),
+            Some("2099-03-01T00:00:00+00:00")
+        );
         assert!(data.seven_day_cowork_pct.is_none());
         assert!(data.seven_day_oauth_apps_pct.is_none());
     }

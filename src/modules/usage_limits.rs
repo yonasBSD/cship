@@ -200,14 +200,22 @@ fn format_output(data: &UsageLimitsData, cfg: &UsageLimitsConfig) -> String {
     const FIVE_HOUR_SECS: u64 = 18_000;
     const SEVEN_DAY_SECS: u64 = 604_800;
 
-    let five_h_resets_epoch = data.five_hour_resets_at_epoch.or_else(|| {
-        crate::cache::iso8601_to_epoch(&data.five_hour_resets_at)
-    });
-    let seven_d_resets_epoch = data.seven_day_resets_at_epoch.or_else(|| {
-        crate::cache::iso8601_to_epoch(&data.seven_day_resets_at)
-    });
-    let five_h_pace = format_pace(calculate_pace(data.five_hour_pct, five_h_resets_epoch, FIVE_HOUR_SECS));
-    let seven_d_pace = format_pace(calculate_pace(data.seven_day_pct, seven_d_resets_epoch, SEVEN_DAY_SECS));
+    let five_h_resets_epoch = data
+        .five_hour_resets_at_epoch
+        .or_else(|| crate::cache::iso8601_to_epoch(&data.five_hour_resets_at));
+    let seven_d_resets_epoch = data
+        .seven_day_resets_at_epoch
+        .or_else(|| crate::cache::iso8601_to_epoch(&data.seven_day_resets_at));
+    let five_h_pace = format_pace(calculate_pace(
+        data.five_hour_pct,
+        five_h_resets_epoch,
+        FIVE_HOUR_SECS,
+    ));
+    let seven_d_pace = format_pace(calculate_pace(
+        data.seven_day_pct,
+        seven_d_resets_epoch,
+        SEVEN_DAY_SECS,
+    ));
 
     let five_h_fmt = cfg
         .five_hour_format
@@ -234,10 +242,30 @@ fn format_output(data: &UsageLimitsData, cfg: &UsageLimitsConfig) -> String {
     // --- Per-model 7-day breakdowns ---
     #[allow(clippy::type_complexity)]
     let model_entries: &[(&str, Option<f64>, &Option<String>, Option<&str>)] = &[
-        ("opus", data.seven_day_opus_pct, &data.seven_day_opus_resets_at, cfg.opus_format.as_deref()),
-        ("sonnet", data.seven_day_sonnet_pct, &data.seven_day_sonnet_resets_at, cfg.sonnet_format.as_deref()),
-        ("cowork", data.seven_day_cowork_pct, &data.seven_day_cowork_resets_at, cfg.cowork_format.as_deref()),
-        ("oauth", data.seven_day_oauth_apps_pct, &data.seven_day_oauth_apps_resets_at, cfg.oauth_apps_format.as_deref()),
+        (
+            "opus",
+            data.seven_day_opus_pct,
+            &data.seven_day_opus_resets_at,
+            cfg.opus_format.as_deref(),
+        ),
+        (
+            "sonnet",
+            data.seven_day_sonnet_pct,
+            &data.seven_day_sonnet_resets_at,
+            cfg.sonnet_format.as_deref(),
+        ),
+        (
+            "cowork",
+            data.seven_day_cowork_pct,
+            &data.seven_day_cowork_resets_at,
+            cfg.cowork_format.as_deref(),
+        ),
+        (
+            "oauth",
+            data.seven_day_oauth_apps_pct,
+            &data.seven_day_oauth_apps_resets_at,
+            cfg.oauth_apps_format.as_deref(),
+        ),
     ];
 
     for (name, pct_opt, resets_at_opt, fmt_opt) in model_entries {
@@ -260,10 +288,22 @@ fn format_output(data: &UsageLimitsData, cfg: &UsageLimitsConfig) -> String {
 
     // --- Extra usage ---
     if data.extra_usage_enabled == Some(true) {
-        let eu_pct = data.extra_usage_utilization.map(|v| format!("{:.0}", v)).unwrap_or_else(|| "?".into());
-        let eu_used = data.extra_usage_used_credits.map(|v| format!("{:.0}", v)).unwrap_or_else(|| "?".into());
-        let eu_limit = data.extra_usage_monthly_limit.map(|v| format!("{:.0}", v)).unwrap_or_else(|| "?".into());
-        let eu_remaining = match (data.extra_usage_monthly_limit, data.extra_usage_used_credits) {
+        let eu_pct = data
+            .extra_usage_utilization
+            .map(|v| format!("{:.0}", v))
+            .unwrap_or_else(|| "?".into());
+        let eu_used = data
+            .extra_usage_used_credits
+            .map(|v| format!("{:.0}", v))
+            .unwrap_or_else(|| "?".into());
+        let eu_limit = data
+            .extra_usage_monthly_limit
+            .map(|v| format!("{:.0}", v))
+            .unwrap_or_else(|| "?".into());
+        let eu_remaining = match (
+            data.extra_usage_monthly_limit,
+            data.extra_usage_used_credits,
+        ) {
             (Some(limit), Some(used)) => format!("{:.0}", (limit - used).max(0.0)),
             _ => "?".into(),
         };
@@ -1447,6 +1487,24 @@ mod tests {
     }
 
     #[test]
+    fn test_calculate_pace_zero_elapsed() {
+        // Window just started — resets_at is exactly window_secs in the future.
+        // expected_pct ≈ 0%, so pace ≈ -used_pct.
+        let now_epoch = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let resets_at_epoch = now_epoch + 18000; // full 5h remaining
+        let pace = calculate_pace(10.0, Some(resets_at_epoch), 18000);
+        let p = pace.unwrap();
+        // elapsed ≈ 0, expected_pct ≈ 0, pace ≈ 0 - 10 = -10
+        assert!(
+            p > -15.0 && p < -5.0,
+            "expected ~-10 over-pace at zero elapsed, got {p}"
+        );
+    }
+
+    #[test]
     fn test_calculate_pace_reset_in_past() {
         let now_epoch = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -1513,7 +1571,10 @@ mod tests {
             ..Default::default()
         };
         let result = format_output(&data, &cfg);
-        assert!(result.contains("pace:+"), "expected positive pace in: {result:?}");
+        assert!(
+            result.contains("pace:+"),
+            "expected positive pace in: {result:?}"
+        );
         assert!(result.contains("5h 30%"), "expected 5h 30% in: {result:?}");
     }
 
@@ -1545,7 +1606,10 @@ mod tests {
             ..Default::default()
         };
         let result = format_output(&data, &cfg);
-        assert!(result.contains("pace:?"), "expected ? for unknown pace in: {result:?}");
+        assert!(
+            result.contains("pace:?"),
+            "expected ? for unknown pace in: {result:?}"
+        );
     }
 
     // ── extra usage in format_output() tests ─────────────────────────────────
@@ -1580,7 +1644,10 @@ mod tests {
         let result = format_output(&data, &cfg);
         assert!(result.contains("100%"), "five_hour in: {result:?}");
         assert!(result.contains("50%"), "seven_day in: {result:?}");
-        assert!(result.contains("extra:"), "extra usage default format in: {result:?}");
+        assert!(
+            result.contains("extra:"),
+            "extra usage default format in: {result:?}"
+        );
         assert!(result.contains("31%"), "extra pct in: {result:?}");
         assert!(result.contains("6195"), "used credits in: {result:?}");
         assert!(result.contains("20000"), "monthly limit in: {result:?}");
@@ -1610,7 +1677,10 @@ mod tests {
         };
         let cfg = UsageLimitsConfig::default();
         let result = format_output(&data, &cfg);
-        assert!(!result.contains("extra"), "extra usage should be hidden when disabled: {result:?}");
+        assert!(
+            !result.contains("extra"),
+            "extra usage should be hidden when disabled: {result:?}"
+        );
     }
 
     #[test]
@@ -1637,7 +1707,10 @@ mod tests {
         };
         let cfg = UsageLimitsConfig::default();
         let result = format_output(&data, &cfg);
-        assert!(!result.contains("extra"), "extra usage should be absent: {result:?}");
+        assert!(
+            !result.contains("extra"),
+            "extra usage should be absent: {result:?}"
+        );
     }
 
     #[test]
@@ -1670,7 +1743,10 @@ mod tests {
         };
         let result = format_output(&data, &cfg);
         assert!(result.contains("EXTRA 31%"), "custom format: {result:?}");
-        assert!(result.contains("rem:13805"), "remaining credits: {result:?}");
+        assert!(
+            result.contains("rem:13805"),
+            "remaining credits: {result:?}"
+        );
     }
 
     // ── per-model in format_output() tests ───────────────────────────────────
@@ -1704,9 +1780,18 @@ mod tests {
         };
         let result = format_output(&data, &cfg);
         assert!(result.contains("opus 12%"), "opus breakdown in: {result:?}");
-        assert!(result.contains("sonnet 3%"), "sonnet breakdown in: {result:?}");
-        assert!(!result.contains("cowork"), "null cowork should be omitted: {result:?}");
-        assert!(!result.contains("oauth"), "null oauth_apps should be omitted: {result:?}");
+        assert!(
+            result.contains("sonnet 3%"),
+            "sonnet breakdown in: {result:?}"
+        );
+        assert!(
+            !result.contains("cowork"),
+            "null cowork should be omitted: {result:?}"
+        );
+        assert!(
+            !result.contains("oauth"),
+            "null oauth_apps should be omitted: {result:?}"
+        );
     }
 
     #[test]
@@ -1738,7 +1823,10 @@ mod tests {
             ..Default::default()
         };
         let result = format_output(&data, &cfg);
-        assert!(result.contains("OP:12%/88%"), "custom opus format: {result:?}");
+        assert!(
+            result.contains("OP:12%/88%"),
+            "custom opus format: {result:?}"
+        );
     }
 
     #[test]
