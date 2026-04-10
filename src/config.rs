@@ -274,10 +274,16 @@ pub struct UsageLimitsConfig {
     /// Default: "opus {pct}%"
     pub opus_format: Option<String>,
     /// Format string for 7-day Sonnet breakdown.
+    /// Placeholders: {pct}, {reset}, {remaining}
+    /// Default: "sonnet {pct}%"
     pub sonnet_format: Option<String>,
     /// Format string for 7-day Cowork breakdown.
+    /// Placeholders: {pct}, {reset}, {remaining}
+    /// Default: "cowork {pct}%"
     pub cowork_format: Option<String>,
     /// Format string for 7-day OAuth apps breakdown.
+    /// Placeholders: {pct}, {reset}, {remaining}
+    /// Default: "oauth {pct}%"
     pub oauth_apps_format: Option<String>,
 }
 

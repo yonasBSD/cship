@@ -14,7 +14,7 @@
 /// Unix epoch directly). On the OAuth/cache path these fields are `None` and the ISO 8601
 /// string fields are used instead. Serde serialises `None` as `null`, which is ignored by
 /// old cache readers (backward-compatible).
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct UsageLimitsData {
     pub five_hour_pct: f64,
     pub seven_day_pct: f64,

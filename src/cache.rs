@@ -287,20 +287,7 @@ mod tests {
             seven_day_pct: 45.1,
             five_hour_resets_at: "2099-01-01T00:00:00Z".into(),
             seven_day_resets_at: "2099-01-01T00:00:00Z".into(),
-            five_hour_resets_at_epoch: None,
-            seven_day_resets_at_epoch: None,
-            extra_usage_enabled: None,
-            extra_usage_monthly_limit: None,
-            extra_usage_used_credits: None,
-            extra_usage_utilization: None,
-            seven_day_opus_pct: None,
-            seven_day_opus_resets_at: None,
-            seven_day_sonnet_pct: None,
-            seven_day_sonnet_resets_at: None,
-            seven_day_cowork_pct: None,
-            seven_day_cowork_resets_at: None,
-            seven_day_oauth_apps_pct: None,
-            seven_day_oauth_apps_resets_at: None,
+            ..Default::default()
         }
     }
 
@@ -378,20 +365,7 @@ mod tests {
             seven_day_pct: 10.0,
             five_hour_resets_at: "2000-01-01T00:00:00Z".into(), // past
             seven_day_resets_at: "2099-01-01T00:00:00Z".into(), // future
-            five_hour_resets_at_epoch: None,
-            seven_day_resets_at_epoch: None,
-            extra_usage_enabled: None,
-            extra_usage_monthly_limit: None,
-            extra_usage_used_credits: None,
-            extra_usage_utilization: None,
-            seven_day_opus_pct: None,
-            seven_day_opus_resets_at: None,
-            seven_day_sonnet_pct: None,
-            seven_day_sonnet_resets_at: None,
-            seven_day_cowork_pct: None,
-            seven_day_cowork_resets_at: None,
-            seven_day_oauth_apps_pct: None,
-            seven_day_oauth_apps_resets_at: None,
+            ..Default::default()
         };
         write_usage_limits(&transcript, &data, 60);
         let result = read_usage_limits(&transcript, false);
@@ -430,20 +404,7 @@ mod tests {
             seven_day_pct: 10.0,
             five_hour_resets_at: "2099-01-01T00:00:00Z".into(), // future
             seven_day_resets_at: "2000-01-01T00:00:00Z".into(), // past
-            five_hour_resets_at_epoch: None,
-            seven_day_resets_at_epoch: None,
-            extra_usage_enabled: None,
-            extra_usage_monthly_limit: None,
-            extra_usage_used_credits: None,
-            extra_usage_utilization: None,
-            seven_day_opus_pct: None,
-            seven_day_opus_resets_at: None,
-            seven_day_sonnet_pct: None,
-            seven_day_sonnet_resets_at: None,
-            seven_day_cowork_pct: None,
-            seven_day_cowork_resets_at: None,
-            seven_day_oauth_apps_pct: None,
-            seven_day_oauth_apps_resets_at: None,
+            ..Default::default()
         };
         write_usage_limits(&transcript, &data, 60);
         let result = read_usage_limits(&transcript, false);
@@ -462,22 +423,7 @@ mod tests {
         let data = UsageLimitsData {
             five_hour_pct: 50.0,
             seven_day_pct: 10.0,
-            five_hour_resets_at: String::new(),
-            seven_day_resets_at: String::new(),
-            five_hour_resets_at_epoch: None,
-            seven_day_resets_at_epoch: None,
-            extra_usage_enabled: None,
-            extra_usage_monthly_limit: None,
-            extra_usage_used_credits: None,
-            extra_usage_utilization: None,
-            seven_day_opus_pct: None,
-            seven_day_opus_resets_at: None,
-            seven_day_sonnet_pct: None,
-            seven_day_sonnet_resets_at: None,
-            seven_day_cowork_pct: None,
-            seven_day_cowork_resets_at: None,
-            seven_day_oauth_apps_pct: None,
-            seven_day_oauth_apps_resets_at: None,
+            ..Default::default()
         };
         write_usage_limits(&transcript, &data, 60);
         let result = read_usage_limits(&transcript, false);
@@ -587,17 +533,11 @@ mod tests {
         assert!((data.five_hour_pct - 42.0).abs() < f64::EPSILON);
         assert!((data.seven_day_pct - 18.0).abs() < f64::EPSILON);
         // All new fields should be None (backwards-compatible defaults)
-        assert!(
-            data.extra_usage_enabled.is_none(),
-            "extra_usage_enabled should default to None"
-        );
+        assert!(data.extra_usage_enabled.is_none());
         assert!(data.extra_usage_monthly_limit.is_none());
         assert!(data.extra_usage_used_credits.is_none());
         assert!(data.extra_usage_utilization.is_none());
-        assert!(
-            data.seven_day_opus_pct.is_none(),
-            "seven_day_opus_pct should default to None"
-        );
+        assert!(data.seven_day_opus_pct.is_none());
         assert!(data.seven_day_opus_resets_at.is_none());
         assert!(data.seven_day_sonnet_pct.is_none());
         assert!(data.seven_day_sonnet_resets_at.is_none());
@@ -619,20 +559,7 @@ mod tests {
             seven_day_pct: 10.0,
             five_hour_resets_at: "2000-01-01T00:00:00+00:00".into(), // past, +00:00 format
             seven_day_resets_at: "2099-01-01T00:00:00+00:00".into(), // future
-            five_hour_resets_at_epoch: None,
-            seven_day_resets_at_epoch: None,
-            extra_usage_enabled: None,
-            extra_usage_monthly_limit: None,
-            extra_usage_used_credits: None,
-            extra_usage_utilization: None,
-            seven_day_opus_pct: None,
-            seven_day_opus_resets_at: None,
-            seven_day_sonnet_pct: None,
-            seven_day_sonnet_resets_at: None,
-            seven_day_cowork_pct: None,
-            seven_day_cowork_resets_at: None,
-            seven_day_oauth_apps_pct: None,
-            seven_day_oauth_apps_resets_at: None,
+            ..Default::default()
         };
         write_usage_limits(&transcript, &data, 60);
         let result = read_usage_limits(&transcript, false);

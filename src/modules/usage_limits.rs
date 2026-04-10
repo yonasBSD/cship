@@ -141,24 +141,9 @@ fn data_from_stdin_rate_limits(ctx: &Context) -> Option<UsageLimitsData> {
     Some(UsageLimitsData {
         five_hour_pct: five_pct,
         seven_day_pct: seven_pct,
-        // ISO string fields unused on the stdin path — epoch fields carry the reset time.
-        five_hour_resets_at: String::new(),
-        seven_day_resets_at: String::new(),
         five_hour_resets_at_epoch: five_epoch,
         seven_day_resets_at_epoch: seven_epoch,
-        // Extra usage and per-model fields are only populated on the OAuth path.
-        extra_usage_enabled: None,
-        extra_usage_monthly_limit: None,
-        extra_usage_used_credits: None,
-        extra_usage_utilization: None,
-        seven_day_opus_pct: None,
-        seven_day_opus_resets_at: None,
-        seven_day_sonnet_pct: None,
-        seven_day_sonnet_resets_at: None,
-        seven_day_cowork_pct: None,
-        seven_day_cowork_resets_at: None,
-        seven_day_oauth_apps_pct: None,
-        seven_day_oauth_apps_resets_at: None,
+        ..Default::default()
     })
 }
 
@@ -179,42 +164,32 @@ fn data_from_stdin_rate_limits(ctx: &Context) -> Option<UsageLimitsData> {
 /// - `separator`: `" | "`
 fn format_output(data: &UsageLimitsData, cfg: &UsageLimitsConfig) -> String {
     let sep = cfg.separator.as_deref().unwrap_or(" | ");
+    let now = now_epoch();
 
-    // --- Five-hour part ---
-    let five_h_pct = format!("{:.0}", data.five_hour_pct);
-    let five_h_remaining = format!("{:.0}", (100.0 - data.five_hour_pct).max(0.0));
-    let five_h_reset = match data.five_hour_resets_at_epoch {
-        Some(epoch) => format_time_until_epoch(epoch),
-        None => format_time_until(&data.five_hour_resets_at),
-    };
-
-    // --- Seven-day part ---
-    let seven_d_pct = format!("{:.0}", data.seven_day_pct);
-    let seven_d_remaining = format!("{:.0}", (100.0 - data.seven_day_pct).max(0.0));
-    let seven_d_reset = match data.seven_day_resets_at_epoch {
-        Some(epoch) => format_time_until_epoch(epoch),
-        None => format_time_until(&data.seven_day_resets_at),
-    };
-
-    // --- Pace calculation ---
     const FIVE_HOUR_SECS: u64 = 18_000;
     const SEVEN_DAY_SECS: u64 = 604_800;
 
-    let five_h_resets_epoch = data
-        .five_hour_resets_at_epoch
-        .or_else(|| crate::cache::iso8601_to_epoch(&data.five_hour_resets_at));
-    let seven_d_resets_epoch = data
-        .seven_day_resets_at_epoch
-        .or_else(|| crate::cache::iso8601_to_epoch(&data.seven_day_resets_at));
+    let five_h_epoch = resolve_epoch(data.five_hour_resets_at_epoch, &data.five_hour_resets_at);
+    let seven_d_epoch = resolve_epoch(data.seven_day_resets_at_epoch, &data.seven_day_resets_at);
+
+    let five_h_pct = format!("{:.0}", data.five_hour_pct);
+    let five_h_remaining = format!("{:.0}", (100.0 - data.five_hour_pct).max(0.0));
+    let five_h_reset = format_reset(five_h_epoch, now);
     let five_h_pace = format_pace(calculate_pace(
         data.five_hour_pct,
-        five_h_resets_epoch,
+        five_h_epoch,
         FIVE_HOUR_SECS,
+        now,
     ));
+
+    let seven_d_pct = format!("{:.0}", data.seven_day_pct);
+    let seven_d_remaining = format!("{:.0}", (100.0 - data.seven_day_pct).max(0.0));
+    let seven_d_reset = format_reset(seven_d_epoch, now);
     let seven_d_pace = format_pace(calculate_pace(
         data.seven_day_pct,
-        seven_d_resets_epoch,
+        seven_d_epoch,
         SEVEN_DAY_SECS,
+        now,
     ));
 
     let five_h_fmt = cfg
@@ -239,7 +214,6 @@ fn format_output(data: &UsageLimitsData, cfg: &UsageLimitsConfig) -> String {
 
     let mut parts: Vec<String> = vec![five_h_part, seven_d_part];
 
-    // --- Per-model 7-day breakdowns ---
     #[allow(clippy::type_complexity)]
     let model_entries: &[(&str, Option<f64>, &Option<String>, Option<&str>)] = &[
         (
@@ -273,11 +247,17 @@ fn format_output(data: &UsageLimitsData, cfg: &UsageLimitsConfig) -> String {
             let pct_str = format!("{:.0}", pct);
             let remaining_str = format!("{:.0}", (100.0 - pct).max(0.0));
             let reset_str = match resets_at_opt {
-                Some(s) => format_time_until(s),
+                Some(s) => format_reset(crate::cache::iso8601_to_epoch(s), now),
                 None => "?".to_string(),
             };
-            let default_fmt = format!("{name} {{pct}}%");
-            let fmt = fmt_opt.unwrap_or(&default_fmt);
+            let default_fmt;
+            let fmt: &str = match fmt_opt {
+                Some(f) => f,
+                None => {
+                    default_fmt = format!("{name} {{pct}}%");
+                    &default_fmt
+                }
+            };
             let rendered = fmt
                 .replace("{pct}", &pct_str)
                 .replace("{remaining}", &remaining_str)
@@ -286,7 +266,6 @@ fn format_output(data: &UsageLimitsData, cfg: &UsageLimitsConfig) -> String {
         }
     }
 
-    // --- Extra usage ---
     if data.extra_usage_enabled == Some(true) {
         let eu_pct = data
             .extra_usage_utilization
@@ -322,55 +301,31 @@ fn format_output(data: &UsageLimitsData, cfg: &UsageLimitsConfig) -> String {
     parts.join(sep)
 }
 
-/// Convert a Unix epoch reset timestamp to a human-readable time-until string.
-///
-/// This is the epoch-native equivalent of `format_time_until`, used on the stdin path
-/// to avoid a round-trip through ISO 8601 formatting and re-parsing.
-///
-/// - Past timestamp → `"now"`
-/// - < 1 hour → `"45m"`
-/// - < 1 day → `"4h12m"`
-/// - >= 1 day → `"3d2h"`
-fn format_time_until_epoch(reset_epoch: u64) -> String {
-    let now = std::time::SystemTime::now()
+fn now_epoch() -> u64 {
+    std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
-        .unwrap_or(0);
-    if now >= reset_epoch {
-        return "now".to_string();
-    }
-    format_remaining_secs(reset_epoch - now)
+        .unwrap_or(0)
 }
 
-/// Convert an ISO 8601 reset timestamp to a human-readable time-until string.
-///
-/// - Empty string → `"?"`
-/// - Unparseable → `"?"`
-/// - Past timestamp → `"now"`
-/// - < 1 hour → `"45m"`
-/// - < 1 day → `"4h12m"`
-/// - >= 1 day → `"3d2h"`
-fn format_time_until(resets_at: &str) -> String {
-    if resets_at.is_empty() {
-        return "?".to_string();
+/// Resolve a reset epoch: prefer a pre-computed epoch, fall back to parsing an ISO 8601 string.
+fn resolve_epoch(epoch: Option<u64>, iso: &str) -> Option<u64> {
+    epoch.or_else(|| crate::cache::iso8601_to_epoch(iso))
+}
+
+/// Format a resolved epoch as a human-readable time-until string.
+/// `None` → `"?"`, past → `"now"`, otherwise `"4h12m"` / `"3d2h"` / `"45m"`.
+fn format_reset(epoch: Option<u64>, now: u64) -> String {
+    match epoch {
+        None => "?".to_string(),
+        Some(e) if now >= e => "now".to_string(),
+        Some(e) => format_remaining_secs(e - now),
     }
-    let reset_epoch = match crate::cache::iso8601_to_epoch(resets_at) {
-        Some(e) => e,
-        None => return "?".to_string(),
-    };
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
-    if now >= reset_epoch {
-        return "now".to_string();
-    }
-    format_remaining_secs(reset_epoch - now)
 }
 
 /// Format a number of remaining seconds as a compact human-readable string.
 ///
-/// Shared arithmetic used by both `format_time_until_epoch` and `format_time_until`.
+/// Shared arithmetic used by `format_reset`.
 ///
 /// - < 1 hour → `"45m"`
 /// - < 1 day → `"4h12m"`
@@ -392,16 +347,13 @@ fn format_remaining_secs(secs: u64) -> String {
 ///
 /// Returns `Some(pace)` where positive = headroom, negative = over-pace.
 /// Returns `None` when `resets_at_epoch` is unavailable.
-///
-/// - `used_pct`: current utilization percentage (0-100+)
-/// - `resets_at_epoch`: Unix epoch when the window resets; `None` = unknown
-/// - `window_secs`: total window duration in seconds (18000 for 5h, 604800 for 7d)
-fn calculate_pace(used_pct: f64, resets_at_epoch: Option<u64>, window_secs: u64) -> Option<f64> {
+fn calculate_pace(
+    used_pct: f64,
+    resets_at_epoch: Option<u64>,
+    window_secs: u64,
+    now: u64,
+) -> Option<f64> {
     let reset = resets_at_epoch?;
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
     let remaining = reset.saturating_sub(now);
     let elapsed = window_secs.saturating_sub(remaining);
     let elapsed_fraction = elapsed as f64 / window_secs as f64;
@@ -461,6 +413,16 @@ mod tests {
         }
     }
 
+    fn sample_data() -> UsageLimitsData {
+        UsageLimitsData {
+            five_hour_pct: 23.4,
+            seven_day_pct: 45.1,
+            five_hour_resets_at: "2099-01-01T00:00:00Z".into(),
+            seven_day_resets_at: "2099-01-01T00:00:00Z".into(),
+            ..Default::default()
+        }
+    }
+
     // ── render() tests ────────────────────────────────────────────────────────
 
     #[test]
@@ -490,26 +452,7 @@ mod tests {
     fn test_render_cache_hit_returns_formatted_output() {
         let dir = tempfile::tempdir().unwrap();
         let transcript = dir.path().join("test.jsonl");
-        let data = UsageLimitsData {
-            five_hour_pct: 23.4,
-            seven_day_pct: 45.1,
-            five_hour_resets_at: "2099-01-01T00:00:00Z".into(),
-            seven_day_resets_at: "2099-01-01T00:00:00Z".into(),
-            five_hour_resets_at_epoch: None,
-            seven_day_resets_at_epoch: None,
-            extra_usage_enabled: None,
-            extra_usage_monthly_limit: None,
-            extra_usage_used_credits: None,
-            extra_usage_utilization: None,
-            seven_day_opus_pct: None,
-            seven_day_opus_resets_at: None,
-            seven_day_sonnet_pct: None,
-            seven_day_sonnet_resets_at: None,
-            seven_day_cowork_pct: None,
-            seven_day_cowork_resets_at: None,
-            seven_day_oauth_apps_pct: None,
-            seven_day_oauth_apps_resets_at: None,
-        };
+        let data = sample_data();
         crate::cache::write_usage_limits(&transcript, &data, 60);
 
         let ctx = Context {
@@ -532,20 +475,7 @@ mod tests {
             seven_day_pct: 10.0,
             five_hour_resets_at: "2099-01-01T00:00:00Z".into(),
             seven_day_resets_at: "2099-01-01T00:00:00Z".into(),
-            five_hour_resets_at_epoch: None,
-            seven_day_resets_at_epoch: None,
-            extra_usage_enabled: None,
-            extra_usage_monthly_limit: None,
-            extra_usage_used_credits: None,
-            extra_usage_utilization: None,
-            seven_day_opus_pct: None,
-            seven_day_opus_resets_at: None,
-            seven_day_sonnet_pct: None,
-            seven_day_sonnet_resets_at: None,
-            seven_day_cowork_pct: None,
-            seven_day_cowork_resets_at: None,
-            seven_day_oauth_apps_pct: None,
-            seven_day_oauth_apps_resets_at: None,
+            ..Default::default()
         };
         crate::cache::write_usage_limits(&transcript, &data, 60);
 
@@ -577,20 +507,7 @@ mod tests {
             seven_day_pct: 20.0,
             five_hour_resets_at: "2099-01-01T00:00:00Z".into(),
             seven_day_resets_at: "2099-01-01T00:00:00Z".into(),
-            five_hour_resets_at_epoch: None,
-            seven_day_resets_at_epoch: None,
-            extra_usage_enabled: None,
-            extra_usage_monthly_limit: None,
-            extra_usage_used_credits: None,
-            extra_usage_utilization: None,
-            seven_day_opus_pct: None,
-            seven_day_opus_resets_at: None,
-            seven_day_sonnet_pct: None,
-            seven_day_sonnet_resets_at: None,
-            seven_day_cowork_pct: None,
-            seven_day_cowork_resets_at: None,
-            seven_day_oauth_apps_pct: None,
-            seven_day_oauth_apps_resets_at: None,
+            ..Default::default()
         };
         crate::cache::write_usage_limits(&transcript, &data, 60);
 
@@ -627,20 +544,7 @@ mod tests {
             seven_day_pct: 85.0,
             five_hour_resets_at: "2099-01-01T00:00:00Z".into(),
             seven_day_resets_at: "2099-01-01T00:00:00Z".into(),
-            five_hour_resets_at_epoch: None,
-            seven_day_resets_at_epoch: None,
-            extra_usage_enabled: None,
-            extra_usage_monthly_limit: None,
-            extra_usage_used_credits: None,
-            extra_usage_utilization: None,
-            seven_day_opus_pct: None,
-            seven_day_opus_resets_at: None,
-            seven_day_sonnet_pct: None,
-            seven_day_sonnet_resets_at: None,
-            seven_day_cowork_pct: None,
-            seven_day_cowork_resets_at: None,
-            seven_day_oauth_apps_pct: None,
-            seven_day_oauth_apps_resets_at: None,
+            ..Default::default()
         };
         crate::cache::write_usage_limits(&transcript, &data, 60);
 
@@ -677,20 +581,7 @@ mod tests {
             seven_day_pct: 30.0,
             five_hour_resets_at: "2099-01-01T00:00:00Z".into(),
             seven_day_resets_at: "2099-01-01T00:00:00Z".into(),
-            five_hour_resets_at_epoch: None,
-            seven_day_resets_at_epoch: None,
-            extra_usage_enabled: None,
-            extra_usage_monthly_limit: None,
-            extra_usage_used_credits: None,
-            extra_usage_utilization: None,
-            seven_day_opus_pct: None,
-            seven_day_opus_resets_at: None,
-            seven_day_sonnet_pct: None,
-            seven_day_sonnet_resets_at: None,
-            seven_day_cowork_pct: None,
-            seven_day_cowork_resets_at: None,
-            seven_day_oauth_apps_pct: None,
-            seven_day_oauth_apps_resets_at: None,
+            ..Default::default()
         };
         crate::cache::write_usage_limits(&transcript, &data, 60);
         // Verify read_usage_limits(allow_stale=true) works even after TTL would normally expire
@@ -709,20 +600,7 @@ mod tests {
             seven_day_pct: 30.0,
             five_hour_resets_at: "2099-01-01T00:00:00Z".into(),
             seven_day_resets_at: "2099-01-01T00:00:00Z".into(),
-            five_hour_resets_at_epoch: None,
-            seven_day_resets_at_epoch: None,
-            extra_usage_enabled: None,
-            extra_usage_monthly_limit: None,
-            extra_usage_used_credits: None,
-            extra_usage_utilization: None,
-            seven_day_opus_pct: None,
-            seven_day_opus_resets_at: None,
-            seven_day_sonnet_pct: None,
-            seven_day_sonnet_resets_at: None,
-            seven_day_cowork_pct: None,
-            seven_day_cowork_resets_at: None,
-            seven_day_oauth_apps_pct: None,
-            seven_day_oauth_apps_resets_at: None,
+            ..Default::default()
         };
         let cloned = expected.clone();
         let result = fetch_with_timeout(move || Ok(cloned));
@@ -741,26 +619,7 @@ mod tests {
     fn test_fetch_with_timeout_timeout_returns_none() {
         let result = fetch_with_timeout(|| {
             std::thread::sleep(std::time::Duration::from_secs(5));
-            Ok(UsageLimitsData {
-                five_hour_pct: 0.0,
-                seven_day_pct: 0.0,
-                five_hour_resets_at: String::new(),
-                seven_day_resets_at: String::new(),
-                five_hour_resets_at_epoch: None,
-                seven_day_resets_at_epoch: None,
-                extra_usage_enabled: None,
-                extra_usage_monthly_limit: None,
-                extra_usage_used_credits: None,
-                extra_usage_utilization: None,
-                seven_day_opus_pct: None,
-                seven_day_opus_resets_at: None,
-                seven_day_sonnet_pct: None,
-                seven_day_sonnet_resets_at: None,
-                seven_day_cowork_pct: None,
-                seven_day_cowork_resets_at: None,
-                seven_day_oauth_apps_pct: None,
-                seven_day_oauth_apps_resets_at: None,
-            })
+            Ok(UsageLimitsData::default())
         });
         assert!(result.is_none());
     }
@@ -789,27 +648,31 @@ mod tests {
         assert_eq!(epoch_to_iso(Some(4_102_358_400)), "2099-12-31T00:00:00Z");
     }
 
-    // ── format_time_until() tests ─────────────────────────────────────────────
-
-    #[test]
-    fn test_format_time_until_empty_string_returns_question_mark() {
-        assert_eq!(format_time_until(""), "?");
-    }
-
-    #[test]
-    fn test_format_time_until_past_timestamp_returns_now() {
-        assert_eq!(format_time_until("2000-01-01T00:00:00Z"), "now");
-    }
-
-    #[test]
-    fn test_format_time_until_hours_minutes() {
-        let now = std::time::SystemTime::now()
+    fn now_secs() -> u64 {
+        std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
-            .as_secs();
-        let future_epoch = now + 4 * 3600 + 12 * 60 + 30; // ~4h12m from now
-        let future_str = epoch_to_iso(Some(future_epoch));
-        let result = format_time_until(&future_str);
+            .as_secs()
+    }
+
+    // ── format_reset() tests ─────────────────────────────────────────────────
+
+    #[test]
+    fn test_format_reset_none_returns_question_mark() {
+        assert_eq!(format_reset(None, now_secs()), "?");
+    }
+
+    #[test]
+    fn test_format_reset_past_returns_now() {
+        let now = now_secs();
+        assert_eq!(format_reset(Some(0), now), "now");
+        assert_eq!(format_reset(Some(now.saturating_sub(1)), now), "now");
+    }
+
+    #[test]
+    fn test_format_reset_hours_minutes() {
+        let now = now_secs();
+        let result = format_reset(Some(now + 4 * 3600 + 12 * 60 + 30), now);
         assert!(
             result.contains('h') && result.contains('m'),
             "expected Xh Ym format: {result}"
@@ -817,14 +680,9 @@ mod tests {
     }
 
     #[test]
-    fn test_format_time_until_days_hours() {
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
-        let future_epoch = now + 3 * 86400 + 2 * 3600 + 30; // ~3d2h from now
-        let future_str = epoch_to_iso(Some(future_epoch));
-        let result = format_time_until(&future_str);
+    fn test_format_reset_days_hours() {
+        let now = now_secs();
+        let result = format_reset(Some(now + 3 * 86400 + 2 * 3600 + 30), now);
         assert!(
             result.contains('d') && result.contains('h'),
             "expected Xd Yh format: {result}"
@@ -832,14 +690,9 @@ mod tests {
     }
 
     #[test]
-    fn test_format_time_until_minutes_only() {
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
-        let future_epoch = now + 45 * 60 + 30; // ~45m from now
-        let future_str = epoch_to_iso(Some(future_epoch));
-        let result = format_time_until(&future_str);
+    fn test_format_reset_minutes_only() {
+        let now = now_secs();
+        let result = format_reset(Some(now + 45 * 60 + 30), now);
         assert!(
             result.ends_with('m') && !result.contains('h'),
             "expected Xm format: {result}"
@@ -847,15 +700,14 @@ mod tests {
     }
 
     #[test]
-    fn test_format_time_until_plus_offset_format() {
-        // Anthropic API returns "+00:00" not "Z" — format_time_until must handle it
-        // Use a far-future timestamp so this test is stable regardless of when it runs
-        let result = format_time_until("2099-01-01T00:00:00+00:00");
-        assert_ne!(result, "?", "should parse +00:00 format, not return '?'");
-        assert_ne!(
-            result, "now",
-            "far-future +00:00 timestamp should not be 'now'"
-        );
+    fn test_resolve_epoch_from_iso_plus_offset() {
+        // Anthropic API returns "+00:00" not "Z" — resolve_epoch must handle it
+        let epoch = resolve_epoch(None, "2099-01-01T00:00:00+00:00");
+        assert!(epoch.is_some(), "should parse +00:00 format");
+        let now = now_secs();
+        let result = format_reset(epoch, now);
+        assert_ne!(result, "?");
+        assert_ne!(result, "now");
     }
 
     // ── format_output() tests ─────────────────────────────────────────────────
@@ -863,26 +715,7 @@ mod tests {
     #[test]
     fn test_format_output_default_produces_legacy_format() {
         // AC1: no config → identical to old hardcoded string
-        let data = UsageLimitsData {
-            five_hour_pct: 23.4,
-            seven_day_pct: 45.1,
-            five_hour_resets_at: "2099-01-01T00:00:00Z".into(),
-            seven_day_resets_at: "2099-01-01T00:00:00Z".into(),
-            five_hour_resets_at_epoch: None,
-            seven_day_resets_at_epoch: None,
-            extra_usage_enabled: None,
-            extra_usage_monthly_limit: None,
-            extra_usage_used_credits: None,
-            extra_usage_utilization: None,
-            seven_day_opus_pct: None,
-            seven_day_opus_resets_at: None,
-            seven_day_sonnet_pct: None,
-            seven_day_sonnet_resets_at: None,
-            seven_day_cowork_pct: None,
-            seven_day_cowork_resets_at: None,
-            seven_day_oauth_apps_pct: None,
-            seven_day_oauth_apps_resets_at: None,
-        };
+        let data = sample_data();
         let cfg = UsageLimitsConfig::default();
         let result = format_output(&data, &cfg);
         assert!(result.starts_with("5h: 23%"), "5h prefix: {result:?}");
@@ -898,20 +731,7 @@ mod tests {
             seven_day_pct: 10.0,
             five_hour_resets_at: "2099-01-01T00:00:00Z".into(),
             seven_day_resets_at: "2099-01-01T00:00:00Z".into(),
-            five_hour_resets_at_epoch: None,
-            seven_day_resets_at_epoch: None,
-            extra_usage_enabled: None,
-            extra_usage_monthly_limit: None,
-            extra_usage_used_credits: None,
-            extra_usage_utilization: None,
-            seven_day_opus_pct: None,
-            seven_day_opus_resets_at: None,
-            seven_day_sonnet_pct: None,
-            seven_day_sonnet_resets_at: None,
-            seven_day_cowork_pct: None,
-            seven_day_cowork_resets_at: None,
-            seven_day_oauth_apps_pct: None,
-            seven_day_oauth_apps_resets_at: None,
+            ..Default::default()
         };
         let cfg = UsageLimitsConfig {
             five_hour_format: Some("⏱: {pct}%({reset})".into()),
@@ -932,20 +752,7 @@ mod tests {
             seven_day_pct: 45.0,
             five_hour_resets_at: "2099-01-01T00:00:00Z".into(),
             seven_day_resets_at: "2099-01-01T00:00:00Z".into(),
-            five_hour_resets_at_epoch: None,
-            seven_day_resets_at_epoch: None,
-            extra_usage_enabled: None,
-            extra_usage_monthly_limit: None,
-            extra_usage_used_credits: None,
-            extra_usage_utilization: None,
-            seven_day_opus_pct: None,
-            seven_day_opus_resets_at: None,
-            seven_day_sonnet_pct: None,
-            seven_day_sonnet_resets_at: None,
-            seven_day_cowork_pct: None,
-            seven_day_cowork_resets_at: None,
-            seven_day_oauth_apps_pct: None,
-            seven_day_oauth_apps_resets_at: None,
+            ..Default::default()
         };
         let cfg = UsageLimitsConfig {
             seven_day_format: Some("7d {pct}%/{reset}".into()),
@@ -966,20 +773,7 @@ mod tests {
             seven_day_pct: 20.0,
             five_hour_resets_at: "2099-01-01T00:00:00Z".into(),
             seven_day_resets_at: "2099-01-01T00:00:00Z".into(),
-            five_hour_resets_at_epoch: None,
-            seven_day_resets_at_epoch: None,
-            extra_usage_enabled: None,
-            extra_usage_monthly_limit: None,
-            extra_usage_used_credits: None,
-            extra_usage_utilization: None,
-            seven_day_opus_pct: None,
-            seven_day_opus_resets_at: None,
-            seven_day_sonnet_pct: None,
-            seven_day_sonnet_resets_at: None,
-            seven_day_cowork_pct: None,
-            seven_day_cowork_resets_at: None,
-            seven_day_oauth_apps_pct: None,
-            seven_day_oauth_apps_resets_at: None,
+            ..Default::default()
         };
         let cfg = UsageLimitsConfig {
             separator: Some(" — ".into()),
@@ -1004,20 +798,7 @@ mod tests {
             seven_day_pct: 50.0,
             five_hour_resets_at: "2099-01-01T00:00:00Z".into(),
             seven_day_resets_at: "2099-01-01T00:00:00Z".into(),
-            five_hour_resets_at_epoch: None,
-            seven_day_resets_at_epoch: None,
-            extra_usage_enabled: None,
-            extra_usage_monthly_limit: None,
-            extra_usage_used_credits: None,
-            extra_usage_utilization: None,
-            seven_day_opus_pct: None,
-            seven_day_opus_resets_at: None,
-            seven_day_sonnet_pct: None,
-            seven_day_sonnet_resets_at: None,
-            seven_day_cowork_pct: None,
-            seven_day_cowork_resets_at: None,
-            seven_day_oauth_apps_pct: None,
-            seven_day_oauth_apps_resets_at: None,
+            ..Default::default()
         };
         let cfg = UsageLimitsConfig {
             five_hour_format: Some("{pct}%".into()),
@@ -1039,20 +820,7 @@ mod tests {
             seven_day_pct: 10.0,
             five_hour_resets_at: "2099-01-01T00:00:00Z".into(),
             seven_day_resets_at: "2099-01-01T00:00:00Z".into(),
-            five_hour_resets_at_epoch: None,
-            seven_day_resets_at_epoch: None,
-            extra_usage_enabled: None,
-            extra_usage_monthly_limit: None,
-            extra_usage_used_credits: None,
-            extra_usage_utilization: None,
-            seven_day_opus_pct: None,
-            seven_day_opus_resets_at: None,
-            seven_day_sonnet_pct: None,
-            seven_day_sonnet_resets_at: None,
-            seven_day_cowork_pct: None,
-            seven_day_cowork_resets_at: None,
-            seven_day_oauth_apps_pct: None,
-            seven_day_oauth_apps_resets_at: None,
+            ..Default::default()
         };
         crate::cache::write_usage_limits(&transcript, &data, 60);
 
@@ -1346,20 +1114,7 @@ mod tests {
             seven_day_pct: 99.0,
             five_hour_resets_at: "2099-01-01T00:00:00Z".into(),
             seven_day_resets_at: "2099-01-01T00:00:00Z".into(),
-            five_hour_resets_at_epoch: None,
-            seven_day_resets_at_epoch: None,
-            extra_usage_enabled: None,
-            extra_usage_monthly_limit: None,
-            extra_usage_used_credits: None,
-            extra_usage_utilization: None,
-            seven_day_opus_pct: None,
-            seven_day_opus_resets_at: None,
-            seven_day_sonnet_pct: None,
-            seven_day_sonnet_resets_at: None,
-            seven_day_cowork_pct: None,
-            seven_day_cowork_resets_at: None,
-            seven_day_oauth_apps_pct: None,
-            seven_day_oauth_apps_resets_at: None,
+            ..Default::default()
         };
         crate::cache::write_usage_limits(&transcript, &cache_data, 60);
 
@@ -1406,20 +1161,16 @@ mod tests {
     }
 
     #[test]
-    fn test_format_time_until_epoch_past_returns_now() {
-        // A past epoch (e.g., Unix epoch 0) should return "now"
-        assert_eq!(format_time_until_epoch(0), "now");
-        assert_eq!(format_time_until_epoch(1), "now");
+    fn test_format_reset_epoch_past_returns_now() {
+        let now = now_secs();
+        assert_eq!(format_reset(Some(0), now), "now");
+        assert_eq!(format_reset(Some(1), now), "now");
     }
 
     #[test]
-    fn test_format_time_until_epoch_hours_minutes() {
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
-        let future_epoch = now + 4 * 3600 + 12 * 60 + 30; // ~4h12m from now
-        let result = format_time_until_epoch(future_epoch);
+    fn test_format_reset_epoch_hours_minutes() {
+        let now = now_secs();
+        let result = format_reset(Some(now + 4 * 3600 + 12 * 60 + 30), now);
         assert!(
             result.contains('h') && result.contains('m'),
             "expected Xh Ym format: {result}"
@@ -1427,13 +1178,9 @@ mod tests {
     }
 
     #[test]
-    fn test_format_time_until_epoch_days_hours() {
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
-        let future_epoch = now + 3 * 86400 + 2 * 3600 + 30; // ~3d2h from now
-        let result = format_time_until_epoch(future_epoch);
+    fn test_format_reset_epoch_days_hours() {
+        let now = now_secs();
+        let result = format_reset(Some(now + 3 * 86400 + 2 * 3600 + 30), now);
         assert!(
             result.contains('d') && result.contains('h'),
             "expected Xd Yh format: {result}"
@@ -1441,13 +1188,9 @@ mod tests {
     }
 
     #[test]
-    fn test_format_time_until_epoch_minutes_only() {
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
-        let future_epoch = now + 45 * 60 + 30; // ~45m from now
-        let result = format_time_until_epoch(future_epoch);
+    fn test_format_reset_epoch_minutes_only() {
+        let now = now_secs();
+        let result = format_reset(Some(now + 45 * 60 + 30), now);
         assert!(
             result.ends_with('m') && !result.contains('h'),
             "expected Xm format: {result}"
@@ -1458,46 +1201,31 @@ mod tests {
 
     #[test]
     fn test_calculate_pace_headroom() {
-        let now_epoch = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
-        let resets_at_epoch = now_epoch + 9000; // 50% elapsed of 5h
-        let pace = calculate_pace(30.0, Some(resets_at_epoch), 18000);
+        let now = now_secs();
+        let pace = calculate_pace(30.0, Some(now + 9000), 18000, now);
         let p = pace.unwrap();
         assert!(p > 15.0 && p < 25.0, "expected ~+20 headroom, got {p}");
     }
 
     #[test]
     fn test_calculate_pace_over_pace() {
-        let now_epoch = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
-        let resets_at_epoch = now_epoch + 9000;
-        let pace = calculate_pace(70.0, Some(resets_at_epoch), 18000);
+        let now = now_secs();
+        let pace = calculate_pace(70.0, Some(now + 9000), 18000, now);
         let p = pace.unwrap();
         assert!(p < -15.0 && p > -25.0, "expected ~-20 over-pace, got {p}");
     }
 
     #[test]
     fn test_calculate_pace_no_reset_returns_none() {
-        let pace = calculate_pace(50.0, None, 18000);
+        let pace = calculate_pace(50.0, None, 18000, now_secs());
         assert!(pace.is_none());
     }
 
     #[test]
     fn test_calculate_pace_zero_elapsed() {
-        // Window just started — resets_at is exactly window_secs in the future.
-        // expected_pct ≈ 0%, so pace ≈ -used_pct.
-        let now_epoch = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
-        let resets_at_epoch = now_epoch + 18000; // full 5h remaining
-        let pace = calculate_pace(10.0, Some(resets_at_epoch), 18000);
+        let now = now_secs();
+        let pace = calculate_pace(10.0, Some(now + 18000), 18000, now);
         let p = pace.unwrap();
-        // elapsed ≈ 0, expected_pct ≈ 0, pace ≈ 0 - 10 = -10
         assert!(
             p > -15.0 && p < -5.0,
             "expected ~-10 over-pace at zero elapsed, got {p}"
@@ -1506,11 +1234,8 @@ mod tests {
 
     #[test]
     fn test_calculate_pace_reset_in_past() {
-        let now_epoch = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
-        let pace = calculate_pace(30.0, Some(now_epoch.saturating_sub(100)), 18000);
+        let now = now_secs();
+        let pace = calculate_pace(30.0, Some(now.saturating_sub(100)), 18000, now);
         let p = pace.unwrap();
         assert!(p > 65.0 && p < 75.0, "expected ~+70 headroom, got {p}");
     }
@@ -1548,22 +1273,9 @@ mod tests {
         let data = UsageLimitsData {
             five_hour_pct: 30.0,
             seven_day_pct: 10.0,
-            five_hour_resets_at: String::new(),
-            seven_day_resets_at: String::new(),
             five_hour_resets_at_epoch: Some(now_epoch + 9000),
             seven_day_resets_at_epoch: Some(now_epoch + 302400),
-            extra_usage_enabled: None,
-            extra_usage_monthly_limit: None,
-            extra_usage_used_credits: None,
-            extra_usage_utilization: None,
-            seven_day_opus_pct: None,
-            seven_day_opus_resets_at: None,
-            seven_day_sonnet_pct: None,
-            seven_day_sonnet_resets_at: None,
-            seven_day_cowork_pct: None,
-            seven_day_cowork_resets_at: None,
-            seven_day_oauth_apps_pct: None,
-            seven_day_oauth_apps_resets_at: None,
+            ..Default::default()
         };
         let cfg = UsageLimitsConfig {
             five_hour_format: Some("5h {pct}% pace:{pace}".into()),
@@ -1583,22 +1295,7 @@ mod tests {
         let data = UsageLimitsData {
             five_hour_pct: 30.0,
             seven_day_pct: 10.0,
-            five_hour_resets_at: String::new(),
-            seven_day_resets_at: String::new(),
-            five_hour_resets_at_epoch: None,
-            seven_day_resets_at_epoch: None,
-            extra_usage_enabled: None,
-            extra_usage_monthly_limit: None,
-            extra_usage_used_credits: None,
-            extra_usage_utilization: None,
-            seven_day_opus_pct: None,
-            seven_day_opus_resets_at: None,
-            seven_day_sonnet_pct: None,
-            seven_day_sonnet_resets_at: None,
-            seven_day_cowork_pct: None,
-            seven_day_cowork_resets_at: None,
-            seven_day_oauth_apps_pct: None,
-            seven_day_oauth_apps_resets_at: None,
+            ..Default::default()
         };
         let cfg = UsageLimitsConfig {
             five_hour_format: Some("5h {pct}% pace:{pace}".into()),
@@ -1621,20 +1318,11 @@ mod tests {
             seven_day_pct: 50.0,
             five_hour_resets_at: "2099-01-01T00:00:00Z".into(),
             seven_day_resets_at: "2099-01-01T00:00:00Z".into(),
-            five_hour_resets_at_epoch: None,
-            seven_day_resets_at_epoch: None,
             extra_usage_enabled: Some(true),
             extra_usage_monthly_limit: Some(20000.0),
             extra_usage_used_credits: Some(6195.0),
             extra_usage_utilization: Some(31.0),
-            seven_day_opus_pct: None,
-            seven_day_opus_resets_at: None,
-            seven_day_sonnet_pct: None,
-            seven_day_sonnet_resets_at: None,
-            seven_day_cowork_pct: None,
-            seven_day_cowork_resets_at: None,
-            seven_day_oauth_apps_pct: None,
-            seven_day_oauth_apps_resets_at: None,
+            ..Default::default()
         };
         let cfg = UsageLimitsConfig {
             five_hour_format: Some("{pct}%".into()),
@@ -1660,20 +1348,11 @@ mod tests {
             seven_day_pct: 20.0,
             five_hour_resets_at: "2099-01-01T00:00:00Z".into(),
             seven_day_resets_at: "2099-01-01T00:00:00Z".into(),
-            five_hour_resets_at_epoch: None,
-            seven_day_resets_at_epoch: None,
             extra_usage_enabled: Some(false),
             extra_usage_monthly_limit: Some(20000.0),
             extra_usage_used_credits: Some(0.0),
             extra_usage_utilization: Some(0.0),
-            seven_day_opus_pct: None,
-            seven_day_opus_resets_at: None,
-            seven_day_sonnet_pct: None,
-            seven_day_sonnet_resets_at: None,
-            seven_day_cowork_pct: None,
-            seven_day_cowork_resets_at: None,
-            seven_day_oauth_apps_pct: None,
-            seven_day_oauth_apps_resets_at: None,
+            ..Default::default()
         };
         let cfg = UsageLimitsConfig::default();
         let result = format_output(&data, &cfg);
@@ -1690,20 +1369,7 @@ mod tests {
             seven_day_pct: 20.0,
             five_hour_resets_at: "2099-01-01T00:00:00Z".into(),
             seven_day_resets_at: "2099-01-01T00:00:00Z".into(),
-            five_hour_resets_at_epoch: None,
-            seven_day_resets_at_epoch: None,
-            extra_usage_enabled: None,
-            extra_usage_monthly_limit: None,
-            extra_usage_used_credits: None,
-            extra_usage_utilization: None,
-            seven_day_opus_pct: None,
-            seven_day_opus_resets_at: None,
-            seven_day_sonnet_pct: None,
-            seven_day_sonnet_resets_at: None,
-            seven_day_cowork_pct: None,
-            seven_day_cowork_resets_at: None,
-            seven_day_oauth_apps_pct: None,
-            seven_day_oauth_apps_resets_at: None,
+            ..Default::default()
         };
         let cfg = UsageLimitsConfig::default();
         let result = format_output(&data, &cfg);
@@ -1720,20 +1386,11 @@ mod tests {
             seven_day_pct: 50.0,
             five_hour_resets_at: "2099-01-01T00:00:00Z".into(),
             seven_day_resets_at: "2099-01-01T00:00:00Z".into(),
-            five_hour_resets_at_epoch: None,
-            seven_day_resets_at_epoch: None,
             extra_usage_enabled: Some(true),
             extra_usage_monthly_limit: Some(20000.0),
             extra_usage_used_credits: Some(6195.0),
             extra_usage_utilization: Some(31.0),
-            seven_day_opus_pct: None,
-            seven_day_opus_resets_at: None,
-            seven_day_sonnet_pct: None,
-            seven_day_sonnet_resets_at: None,
-            seven_day_cowork_pct: None,
-            seven_day_cowork_resets_at: None,
-            seven_day_oauth_apps_pct: None,
-            seven_day_oauth_apps_resets_at: None,
+            ..Default::default()
         };
         let cfg = UsageLimitsConfig {
             five_hour_format: Some("{pct}%".into()),
@@ -1758,20 +1415,11 @@ mod tests {
             seven_day_pct: 30.0,
             five_hour_resets_at: "2099-01-01T00:00:00Z".into(),
             seven_day_resets_at: "2099-01-01T00:00:00Z".into(),
-            five_hour_resets_at_epoch: None,
-            seven_day_resets_at_epoch: None,
-            extra_usage_enabled: None,
-            extra_usage_monthly_limit: None,
-            extra_usage_used_credits: None,
-            extra_usage_utilization: None,
             seven_day_opus_pct: Some(12.0),
             seven_day_opus_resets_at: Some("2099-02-01T00:00:00Z".into()),
             seven_day_sonnet_pct: Some(3.0),
             seven_day_sonnet_resets_at: Some("2099-03-01T00:00:00Z".into()),
-            seven_day_cowork_pct: None,
-            seven_day_cowork_resets_at: None,
-            seven_day_oauth_apps_pct: None,
-            seven_day_oauth_apps_resets_at: None,
+            ..Default::default()
         };
         let cfg = UsageLimitsConfig {
             five_hour_format: Some("{pct}%".into()),
@@ -1801,20 +1449,9 @@ mod tests {
             seven_day_pct: 30.0,
             five_hour_resets_at: "2099-01-01T00:00:00Z".into(),
             seven_day_resets_at: "2099-01-01T00:00:00Z".into(),
-            five_hour_resets_at_epoch: None,
-            seven_day_resets_at_epoch: None,
-            extra_usage_enabled: None,
-            extra_usage_monthly_limit: None,
-            extra_usage_used_credits: None,
-            extra_usage_utilization: None,
             seven_day_opus_pct: Some(12.0),
             seven_day_opus_resets_at: Some("2099-02-01T00:00:00Z".into()),
-            seven_day_sonnet_pct: None,
-            seven_day_sonnet_resets_at: None,
-            seven_day_cowork_pct: None,
-            seven_day_cowork_resets_at: None,
-            seven_day_oauth_apps_pct: None,
-            seven_day_oauth_apps_resets_at: None,
+            ..Default::default()
         };
         let cfg = UsageLimitsConfig {
             five_hour_format: Some("{pct}%".into()),
@@ -1836,20 +1473,7 @@ mod tests {
             seven_day_pct: 30.0,
             five_hour_resets_at: "2099-01-01T00:00:00Z".into(),
             seven_day_resets_at: "2099-01-01T00:00:00Z".into(),
-            five_hour_resets_at_epoch: None,
-            seven_day_resets_at_epoch: None,
-            extra_usage_enabled: None,
-            extra_usage_monthly_limit: None,
-            extra_usage_used_credits: None,
-            extra_usage_utilization: None,
-            seven_day_opus_pct: None,
-            seven_day_opus_resets_at: None,
-            seven_day_sonnet_pct: None,
-            seven_day_sonnet_resets_at: None,
-            seven_day_cowork_pct: None,
-            seven_day_cowork_resets_at: None,
-            seven_day_oauth_apps_pct: None,
-            seven_day_oauth_apps_resets_at: None,
+            ..Default::default()
         };
         let cfg = UsageLimitsConfig {
             five_hour_format: Some("{pct}%".into()),
