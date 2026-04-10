@@ -372,7 +372,7 @@ fn test_context_window_subfields_render_correctly() {
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
     // Output format: "8 92 200000\n" — verify each value appears as a space-delimited token
-    let tokens: Vec<&str> = stdout.trim().split_whitespace().collect();
+    let tokens: Vec<&str> = stdout.split_whitespace().collect();
     assert_eq!(
         tokens.len(),
         3,
@@ -445,7 +445,7 @@ fn test_context_window_total_tokens_render_correctly() {
         .unwrap();
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
-    let tokens: Vec<&str> = stdout.trim().split_whitespace().collect();
+    let tokens: Vec<&str> = stdout.split_whitespace().collect();
     assert_eq!(tokens.len(), 2, "expected 2 tokens: {stdout:?}");
     assert_eq!(
         tokens[0], "15234",
