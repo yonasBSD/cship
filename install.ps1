@@ -32,6 +32,13 @@ if ($arch -eq "AMD64") {
     exit 1
 }
 
+# --- Uninstall any existing cship ---
+$existingCship = Get-Command cship -ErrorAction SilentlyContinue
+if ($existingCship) {
+    Write-Host "Existing cship found — running uninstall to clean up before upgrade..."
+    & $existingCship.Source uninstall
+}
+
 # --- Fetch latest release tag ---
 Write-Host "Fetching latest cship release..."
 $releaseUrl = "https://api.github.com/repos/$REPO/releases/latest"
