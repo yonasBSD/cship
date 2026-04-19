@@ -333,8 +333,10 @@ mod tests {
 
     #[test]
     fn test_config_section_for_model_with_config() {
-        let mut cfg = CshipConfig::default();
-        cfg.model = Some(crate::config::ModelConfig::default());
+        let cfg = CshipConfig {
+            model: Some(crate::config::ModelConfig::default()),
+            ..Default::default()
+        };
         assert_eq!(config_section_for("cship.model", &cfg), "[cship.model]");
     }
 
@@ -438,11 +440,13 @@ mod tests {
 
     #[test]
     fn test_error_hint_for_disabled_module_returns_disabled_text() {
-        let mut cfg = CshipConfig::default();
-        cfg.model = Some(ModelConfig {
-            disabled: Some(true),
+        let cfg = CshipConfig {
+            model: Some(ModelConfig {
+                disabled: Some(true),
+                ..Default::default()
+            }),
             ..Default::default()
-        });
+        };
         let ctx = Context {
             model: Some(Model {
                 display_name: Some("Sonnet".to_string()),
@@ -466,11 +470,13 @@ mod tests {
 
     #[test]
     fn test_is_disabled_returns_true_for_disabled_model() {
-        let mut cfg = CshipConfig::default();
-        cfg.model = Some(ModelConfig {
-            disabled: Some(true),
+        let cfg = CshipConfig {
+            model: Some(ModelConfig {
+                disabled: Some(true),
+                ..Default::default()
+            }),
             ..Default::default()
-        });
+        };
         assert!(
             is_disabled("cship.model", &cfg),
             "is_disabled should return true when model.disabled = Some(true)"
