@@ -39,8 +39,12 @@ pub fn render(ctx: &Context, cfg: &CshipConfig) -> Option<String> {
     let filled = filled.min(width); // guard floating-point edge at 100%
     let empty = width - filled;
 
-    let filled_char = bar_cfg.and_then(|c| c.filled_char.as_deref()).unwrap_or(DEFAULT_FILLED_CHAR);
-    let empty_char = bar_cfg.and_then(|c| c.empty_char.as_deref()).unwrap_or(DEFAULT_EMPTY_CHAR);
+    let filled_char = bar_cfg
+        .and_then(|c| c.filled_char.as_deref())
+        .unwrap_or(DEFAULT_FILLED_CHAR);
+    let empty_char = bar_cfg
+        .and_then(|c| c.empty_char.as_deref())
+        .unwrap_or(DEFAULT_EMPTY_CHAR);
     let bar: String = filled_char.repeat(filled) + &empty_char.repeat(empty);
     let bar_content = format!("{bar}{:.0}%", used_pct);
 
