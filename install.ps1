@@ -108,7 +108,7 @@ if (-not (Get-Command starship -ErrorAction SilentlyContinue)) {
 # --- Write default cship.toml ---
 if (-not (Test-Path $CONFIG_FILE)) {
     New-Item -ItemType Directory -Force -Path $CONFIG_DIR | Out-Null
-    @'
+    $tomlContent = @'
 # cship — Claude Code statusline
 # Full config reference: https://cship.dev
 [cship]
@@ -145,7 +145,8 @@ warn_threshold     = 60.0
 warn_style         = "fg:#e0af68"
 critical_threshold = 80.0
 critical_style     = "bold fg:#f7768e"
-'@ | Set-Content -Path $CONFIG_FILE -Encoding UTF8
+'@
+    [System.IO.File]::WriteAllText($CONFIG_FILE, $tomlContent, (New-Object System.Text.UTF8Encoding $false))
     Write-Host "Config written to: $CONFIG_FILE"
 } else {
     Write-Host "Config already exists at $CONFIG_FILE - skipping."
@@ -158,7 +159,7 @@ if (-not (Test-Path $claudeDir)) {
     Write-Host "Authenticate in Claude Code first, then re-run this script."
 } elseif (-not (Test-Path $SETTINGS)) {
     # Create minimal settings.json — $claudeDir already exists (checked above)
-    $utf8NoBom = [System.Text.Encoding]::UTF8
+    $utf8NoBom = New-Object System.Text.UTF8Encoding $false
     [System.IO.File]::WriteAllText($SETTINGS, '{"statusLine": {"type": "command", "command": "cship"}}', $utf8NoBom)
     Write-Host "Created settings.json with statusLine entry: $SETTINGS"
 } else {
@@ -169,7 +170,7 @@ if (-not (Test-Path $claudeDir)) {
     } else {
         $json.statusLine = $statusLineValue
     }
-    $utf8NoBom = [System.Text.Encoding]::UTF8
+    $utf8NoBom = New-Object System.Text.UTF8Encoding $false
     [System.IO.File]::WriteAllText($SETTINGS, ($json | ConvertTo-Json -Depth 100), $utf8NoBom)
     Write-Host "Updated settings.json with statusLine entry: $SETTINGS"
 }
