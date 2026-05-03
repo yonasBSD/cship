@@ -14,10 +14,10 @@ use crate::usage_limits::UsageLimitsData;
 thread_local! {
     /// Per-render-cycle memo for `resolve_data`. cship invocations are short-lived
     /// (one process per prompt render), so a thread-local cache effectively means
-    /// "compute once per render." Restores the zero-latency guarantee from commit
-    /// fdeef09 when a status bar references multiple sub-tokens
-    /// ($cship.usage_limits.opus, .sonnet, etc.) — without this, each token would
-    /// independently call resolve_data and pay the OAuth/cache lookup cost.
+    /// "compute once per render cycle." When a status bar references multiple
+    /// sub-tokens ($cship.usage_limits.opus, .sonnet, etc.), each token invokes
+    /// `render` independently; without this cache each call would pay the full
+    /// OAuth/cache lookup cost.
     static RESOLVE_CACHE: std::cell::RefCell<Option<Option<UsageLimitsData>>> =
         const { std::cell::RefCell::new(None) };
 }
@@ -382,10 +382,10 @@ fn format_output(data: &UsageLimitsData, cfg: &UsageLimitsConfig) -> String {
         if !per_model.is_empty() {
             parts.push(per_model);
         }
+    }
 
-        if let Some(extra) = format_extra_usage(data, cfg) {
-            parts.push(extra);
-        }
+    if let Some(extra) = format_extra_usage(data, cfg) {
+        parts.push(extra);
     }
 
     parts.join(sep)
@@ -509,6 +509,12 @@ fn format_extra_usage(data: &UsageLimitsData, cfg: &UsageLimitsConfig) -> Option
         .extra_usage_format
         .as_deref()
         .unwrap_or("{active} extra: {pct}% (${used}/${limit})");
+    if eu_fmt.contains("{remaining}") {
+        tracing::warn!(
+            "`extra_usage_format` contains `{{remaining}}` which is no longer substituted; \
+             use `{{remaining_credits}}` for the dollar amount remaining"
+        );
+    }
     Some(
         eu_fmt
             .replace("{active}", active)
@@ -1835,9 +1841,9 @@ mod tests {
     // ── show_per_model toggle tests (Fix #4) ─────────────────────────────────
 
     #[test]
-    fn test_format_output_default_omits_per_model_and_extra() {
-        // Backwards-compat: default output stays "5h: X% | 7d: X%" even when
-        // per-model and extra-usage data are present in UsageLimitsData.
+    fn test_format_output_default_omits_per_model_only() {
+        // show_per_model defaults to false, so per-model sections are hidden.
+        // Extra-usage is always appended when enabled, regardless of show_per_model.
         let data = UsageLimitsData {
             five_hour_pct: 50.0,
             seven_day_pct: 30.0,
@@ -1858,9 +1864,9 @@ mod tests {
             ..Default::default()
         };
         let result = format_output(&data, &cfg);
-        assert_eq!(result, "50% | 30%", "default output should be legacy shape");
+        assert!(result.starts_with("50% | 30%"), "legacy 5h/7d prefix: {result:?}");
         assert!(!result.contains("opus"), "opus must be hidden by default");
-        assert!(!result.contains("extra"), "extra must be hidden by default");
+        assert!(result.contains("extra"), "extra-usage must show when enabled: {result:?}");
     }
 
     #[test]
